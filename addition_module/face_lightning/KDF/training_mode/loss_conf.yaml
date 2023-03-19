@@ -1,0 +1,18 @@
+SNN-MIMIC:
+
+SoftTarget:
+    T: 4.0
+
+FitNet:
+
+NST:
+
+FSP:
+
+PKT:
+
+FT:
+
+RKD:
+    w_dist: 25.
+    w_angle: 50.

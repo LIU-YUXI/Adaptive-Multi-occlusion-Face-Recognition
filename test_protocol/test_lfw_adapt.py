@@ -49,14 +49,18 @@ class FaceModel(torch.nn.Module):
         head(object): the adapt layer of face model.
         clip_model(object)
     """
-    def __init__(self, backbone, adapt):
+    def __init__(self, backbone, adapt, clip_model, text):
         super(FaceModel, self).__init__()
         self.backbone = backbone
         self.adapt =adapt
+        self.clip_model = clip_model
+        self.text =text
 
-    def forward(self, data):
+    def forward(self, data, data_clip):
         feat = self.backbone.forward(data)
-        prob = torch.tensor([[1.0,0]]*data.shape[0], dtype=torch.float32).to(data.device)
+        logits_per_image, logits_per_text = self.clip_model(data_clip, self.text)
+        prob = logits_per_image.softmax(dim=-1)
+        # prob = torch.tensor([[1.0,0]]*data.shape[0], dtype=torch.float32).to(data.device)
         pred = self.adapt.forward(feat,prob)
         return pred
 
@@ -87,21 +91,24 @@ if __name__ == '__main__':
         pairs_file_path = data_conf['pairs_file_path']
         cropped_face_folder = data_conf['cropped_face_folder']
         image_list_file_path = data_conf['image_list_file_path']
+
+    clip_model, preprocess = clip.load("RN50x16", device=torch.device(args.device))
+    clip_model.eval()
+    text = clip.tokenize(["A human face","A human face in a mask" ]).to(args.device)
+    args.category_mum = text.shape[0]
+    print("mask category num:",args.category_mum)
+
     # define pairs_parser_factory
     pairs_parser_factory = PairsParserFactory(pairs_file_path, args.test_set)
     # define dataloader
-    data_loader = DataLoader(CommonTestDataset(cropped_face_folder, image_list_file_path, False), 
+    data_loader = DataLoader(CommonTestDataset(cropped_face_folder, image_list_file_path, False, preprocess), 
                              batch_size=args.batch_size, num_workers=4, shuffle=False)
     #model def
     backbone_factory = BackboneFactory(args.backbone_type, args.backbone_conf_file)
     model_loader = iresnet100(num_features=args.embedding_size)# ModelLoader(backbone_factory)
     feature_extractor = CommonExtractor(args.device)
     lfw_evaluator = LFWEvaluator(data_loader, pairs_parser_factory, feature_extractor)
-    clip_model, preprocess = clip.load("RN50x16", device=torch.device(args.device))
-    clip_model.eval()
-    text = clip.tokenize(["A human face without a mask","A human face in a mask" ]).to(args.device)
-    args.category_mum = text.shape[0]
-    print("mask category num:",args.category_mum)
+
     adapt_model = Adapt_Layer(args.embedding_size,args.category_mum)
     if os.path.isdir(args.model_path):
         accu_list = []
@@ -119,7 +126,7 @@ if __name__ == '__main__':
         model = model_loader.cuda(args.device)
         adapt_model.load_state_dict(torch.load(args.adapt_path,map_location='cpu')['state_dict'])
         adapt_model = adapt_model.cuda(args.device)
-        test_model = FaceModel(model,adapt_model)
+        test_model = FaceModel(model,adapt_model,clip_model,text)
         mean, std = lfw_evaluator.test(test_model)
         accu_list = [(os.path.basename(args.model_path), mean, std)]
     pretty_tabel = PrettyTable(["model_name", "mean accuracy", "standard error"])

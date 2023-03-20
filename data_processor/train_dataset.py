@@ -11,6 +11,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
+from PIL import Image
 '''
 landmarks = np.array([[36.2946, 51.5014],
                       [76.5318, 51.5014],
@@ -171,17 +172,21 @@ class ImageDataset_KD(Dataset):
         prob=random.uniform(0, 1)
         if (prob<0.5):
             masked_sample=self.mask_images(sample)
-            plt.imshow(masked_sample.astype('uint8'))
+            # plt.imshow(masked_sample.astype('uint8'))
             # 保存图片
-            plt.savefig('./out_pic/img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
             if self.transform is not None:
              sample = self.transform(sample)
-             masked_sample=self.transform(masked_sample)
-            return masked_sample,sample, image_label
+             masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+             masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 1
         else:
             if self.transform is not None:
-                sample = self.transform(sample)
-            return sample,sample,image_label
+                sample_t = self.transform(sample)
+            if self.preprocess is not None:
+             sample_clip=self.preprocess(Image.fromarray(np.uint8(sample)))
+            return sample_t,sample_clip,sample_t,image_label, 0
     
     def mask_images(self,img):
         

@@ -35,9 +35,10 @@ class CommonExtractor:
         model.eval()
         image_name2feature = {}
         with torch.no_grad(): 
-            for batch_idx, (images, filenames) in enumerate(data_loader):
+            for batch_idx, (images,images_clip, filenames) in enumerate(data_loader):
                 images = images.to(self.device)
-                features = model(images)
+                images_clip = images_clip.to(self.device)
+                features = model(images,images_clip)
                 features = F.normalize(features)
                 features = features.cpu().numpy()
                 for filename, feature in zip(filenames, features): 

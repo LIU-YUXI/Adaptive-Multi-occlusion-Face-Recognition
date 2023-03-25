@@ -3,6 +3,11 @@ LFW:
     cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/lfw_mask_new/crop_mask_img
     image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/lfw_mask_new/img_list.txt
 
+MEGLASS:
+    pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/glasses_pairs.txt
+    cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/MeGlass_120x120_reid
+    image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/glass_train_list.txt
+
 CPLFW:
     pairs_file_path: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/cplfw/ori_data/pairs_CPLFW.txt
     cropped_face_folder: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/cplfw/cplfw_crop

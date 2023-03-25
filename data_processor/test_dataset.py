@@ -46,7 +46,7 @@ class CommonTestDataset(Dataset):
             image_clip=self.preprocess(Image.fromarray(np.uint8(image)))
         else:
             image_clip=image
-        #image = cv2.resize(image, (128, 128))
+        image = cv2.resize(image, (112, 112))
         if self.crop_eye:
             image = image[:60, :]
         image = (image.transpose((2, 0, 1)) - self.mean) / self.std

@@ -37,6 +37,7 @@ class LFW_PairsParser(PairsParser):
         line = pairs_file_buf.readline().strip()
         while line:
             line_strs = line.split('\t')
+            # print(line_strs)
             if len(line_strs) == 3:
                 person_name = line_strs[0]
                 image_index1 = line_strs[1]
@@ -190,5 +191,5 @@ class PairsParserFactory(object):
         elif 'RFW' in self.test_set:
             pairs_parser = RFW_PairsParser(self.pairs_file)
         else:
-            pairs_parser = None
+            pairs_parser = LFW_PairsParser(self.pairs_file)
         return pairs_parser

@@ -85,10 +85,10 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
             # print(cgs[:10],prob[:10])
         # prob = torch.tensor([[1.0,0]]*images.shape[0], dtype=torch.float32).to(conf.device)
         # print(prob.shape)
-        features_adapt = adapt_model(features_student, prob)
+        features_adapt = adapt_model(features_student, prob)# F.normalize( )
         thetas = header(features_adapt, labels)
         loss_v1 = criterion(thetas, labels)
-        loss_v2 = conf.w*criterion2(features_student, features_teacher)
+        loss_v2 = conf.w*criterion2(features_adapt, features_teacher)
         loss_v = loss_v1 + loss_v2
         loss_v.backward()#compute
 
@@ -162,7 +162,7 @@ def train(conf):
              ])
     clip_model, preprocess = clip.load("RN50x16", device=torch.device(conf.device))
     clip_model.eval()
-    text = clip.tokenize(["A human face","A human face in a mask" ]).to(conf.device) # without a mask
+    text = clip.tokenize(["A human face","A human face in a mask","A human face with glasses"]).to(conf.device) # without a mask
     conf.category_mum = text.shape[0]
     print("mask category num:",conf.category_mum)
     '''
@@ -177,11 +177,6 @@ def train(conf):
             logger.info("load adapt layer resume init, failed!")
     adapt_model.train()
     adapt_model = adapt_model.cuda(conf.device)
-    parameters = [p for p in adapt_model.parameters() if p.requires_grad]
-    adapt_optimizer = optim.SGD(parameters, lr = conf.lr, 
-                          momentum = conf.momentum, weight_decay = 1e-4)
-    lr_schedule_adapt = optim.lr_scheduler.MultiStepLR(
-        adapt_optimizer, milestones = conf.milestones, gamma = 0.1)
     '''
     data
     '''
@@ -220,6 +215,22 @@ def train(conf):
     ori_epoch = 0
     if conf.resume:
         ori_epoch = torch.load(args.pretrain_model,map_location='cpu')['epoch'] + 1
+
+    conf.milestones=list(np.array(conf.milestones)-ori_epoch)
+    milestones = conf.milestones
+    for i in range(len(milestones)):
+        if(milestones[i]<0):
+            conf.lr/=10
+            conf.milestones=conf.milestones[1:]
+    print(conf.milestones)
+    if(len(conf.milestones)==0):
+        conf.milestones=[100]
+    parameters = [p for p in adapt_model.parameters() if p.requires_grad]
+    adapt_optimizer = optim.SGD(parameters, lr = conf.lr, 
+                          momentum = conf.momentum, weight_decay = 1e-4)
+    lr_schedule_adapt = optim.lr_scheduler.MultiStepLR(
+        adapt_optimizer, milestones = conf.milestones, gamma = 0.1)
+
     model = backbone_student.cuda(conf.device)# torch.nn.DataParallel(backbone_student).cuda(conf.device)
     parameters = [p for p in backbone_student.parameters() if p.requires_grad]
     model_optimizer = optim.SGD(parameters, lr = conf.lr, 

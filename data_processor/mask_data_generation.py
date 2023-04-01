@@ -63,8 +63,8 @@ class MaskData(object):
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
         image = cv2.imread(image_path)
-        image[25:225, 25:225]
-        image = cv2.resize(image, (112, 112)) #128 * 128
+        # image[25:225, 25:225]
+        # image = cv2.resize(image, (112, 112)) #128 * 128
         if image.ndim == 2:
             image = image[:, :, np.newaxis]
         # return image, image_label
@@ -78,28 +78,45 @@ class MaskData(object):
             img.save(image_save_path)
         elif (mask_type=='glasses'):
             # print(image_save_path)
-            masked_sample=self.mask_images_glass(sample)
+            masked_sample=self.mask_images_glass(sample,landmarks=self.get_landmark(image_path))
             img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            image = cv2.resize(image, (112, 112))
             # 保存PIL Image对象为图片
+            # print(image_save_path)
+            img.save(image_save_path)
+        elif (mask_type=='sunglasses'):
+            # print(image_save_path)
+            masked_sample=self.mask_images_sunglass(sample,landmarks=self.get_landmark(image_path))
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            image = cv2.resize(image, (112, 112))
+            # 保存PIL Image对象为图片
+            # print(image_save_path)
             img.save(image_save_path)
     def generate(self, mask_type):
-        self.data_save_root = self.data_root+'__'+mask_type
+        self.data_save_root = self.data_root+'_random_'+mask_type
         if not os.path.exists(self.data_save_root):
             os.makedirs(self.data_save_root)
         print(self.data_save_root)
         for index in range(self.__len__()):
             self.__maskitem__(index, mask_type)
-            return
+            # print(index)
+            '''
+            if index==100:
+                return
+            '''
     def get_landmark(self, file_path):
         filename=os.path.basename(file_path)
-        filename=filename[:-3]+'_5loc_attri.txt'
+        filename=filename[:-4]+'_5loc_attri.txt'
         file_path_new = os.path.join(self.landmark_root,filename)
         train_file_buf = open(file_path_new)
         line = train_file_buf.readline().strip()
         landmarks=[]
         while line:
             landmarks.append(line.split(' '))
-        print(landmarks)
+            landmarks[-1][0]=float(landmarks[-1][0])
+            landmarks[-1][1]=float(landmarks[-1][1])
+            line = train_file_buf.readline().strip()
+        # print(landmarks)
         return landmarks
     def mask_images(self,img):
         # get landmarks
@@ -159,8 +176,8 @@ class MaskData(object):
 
         return img
 
-    def mask_images_glass(self,img):
-        
+    def mask_images_glass(self,img,landmarks):
+        # print(landmarks)
         # get landmarks
         nose = (landmarks[2][0], landmarks[2][1])
         mouth_left = (landmarks[4][0], landmarks[4][1])
@@ -169,10 +186,10 @@ class MaskData(object):
         eye_right = (landmarks[0][0], landmarks[0][1])
     
         #apply random shift of fakemask
-        # rs = np.random.randint(-40,40)
-        # rx = np.random.randint(-10,10)
-        rs = 0
-        rx = 0
+        rs = np.random.randint(-80,80)
+        rx = np.random.randint(-20,20)
+        # rs = 0
+        # rx = 0
         '''
         #keypoints of mask image
         src_pts = np.array([np.array([678+rx,464+rs]), 
@@ -182,11 +199,11 @@ class MaskData(object):
                             np.array([557+rx,64+rs])], dtype="float32")
         '''
         #keypoints of mask image
-        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
-                            np.array([580+rx,614+rs+20*1]), 
-                            np.array([1047+rx,614+rs+20*1]), 
-                            np.array([967+rx,150+rs-20*5]), 
-                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1+20*2]), 
+                            np.array([580+rx,614+rs+20*1+20*2]), 
+                            np.array([1047+rx,614+rs+20*1+20*2]), 
+                            np.array([967+rx+60,150+rs-20*5+20*2]), 
+                            np.array([660+rx-60,150+rs-20*5+20*2])], dtype="float32")
         #landmark of image
         dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
                            np.array([int(mouth_left[0]), int(mouth_left[1])]), 
@@ -225,8 +242,8 @@ class MaskData(object):
 
         return img
 
-    def mask_images_sunglass(self,img):
-        
+    def mask_images_sunglass(self,img,landmarks):
+        # print(landmarks)
         # get landmarks
         nose = (landmarks[2][0], landmarks[2][1])
         mouth_left = (landmarks[4][0], landmarks[4][1])
@@ -235,10 +252,10 @@ class MaskData(object):
         eye_right = (landmarks[0][0], landmarks[0][1])
     
         #apply random shift of fakemask
-        # rs = np.random.randint(-40,40)
-        # rx = np.random.randint(-10,10)
-        rs = 0
-        rx = 0
+        rs = np.random.randint(-80,80)
+        rx = np.random.randint(-20,20)
+        # rs = 0
+        # rx = 0
         '''
         #keypoints of mask image
         src_pts = np.array([np.array([678+rx,464+rs]), 
@@ -248,11 +265,11 @@ class MaskData(object):
                             np.array([557+rx,64+rs])], dtype="float32")
         '''
         #keypoints of mask image
-        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
-                            np.array([580+rx,614+rs+20*1]), 
-                            np.array([1047+rx,614+rs+20*1]), 
-                            np.array([967+rx,150+rs-20*5]), 
-                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1+20*2]), 
+                            np.array([580+rx,614+rs+20*1+20*2]), 
+                            np.array([1047+rx,614+rs+20*1+20*2]), 
+                            np.array([967+rx+60,150+rs-20*5+20*2]), 
+                            np.array([660+rx-60,150+rs-20*5+20*2])], dtype="float32")
         #landmark of image
         dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
                            np.array([int(mouth_left[0]), int(mouth_left[1])]), 
@@ -309,7 +326,8 @@ class MaskData(object):
 if __name__ == '__main__':
     cropped_face_folder= "/CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_reid"
     image_list_file_path= '/CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_train_list.txt'
-    MD=MaskData(cropped_face_folder,image_list_file_path)
+    landmarks_root="/CIS20/lyx/FaceX-Zoo-main-new/test_data/CA_landmarks/"
+    MD=MaskData(cropped_face_folder,image_list_file_path,landmark_root=landmarks_root)
     print('begin!')
-    MD.generate('glasses')
+    MD.generate('sunglasses')
     print('end!')

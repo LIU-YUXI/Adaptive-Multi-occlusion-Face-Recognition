@@ -172,6 +172,7 @@ class ImageDataset_KD_adapt(Dataset):
         # return image, image_label
         sample=image
         prob=random.uniform(0, 1)
+        resize_prob=random.uniform(0, 1)
         if (prob<0.33):
             masked_sample=self.mask_images(sample)
             # plt.imshow(masked_sample.astype('uint8'))
@@ -184,10 +185,12 @@ class ImageDataset_KD_adapt(Dataset):
              masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
             return masked_sample_t, masked_sample_clip, sample, image_label, 1
         elif (prob<0.66):
-            masked_sample=self.mask_images_glass(sample)
+            masked_sample=self.mask_images_sunglass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
             # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
             # 保存PIL Image对象为图片
-            # img.save('./out_pic_sunglasses/img%d.jpg'%index)
+            # img.save('./out_pic_sunglasses/a_img%d.jpg'%index)
             # plt.savefig('./out_pic/img%d.jpg'%index)
             if self.transform is not None:
                 sample = self.transform(sample)
@@ -201,7 +204,19 @@ class ImageDataset_KD_adapt(Dataset):
             if self.preprocess is not None:
              sample_clip=self.preprocess(Image.fromarray(np.uint8(sample)))
             return sample_t,sample_clip,sample_t,image_label, 0
-    
+    def crop_images(self,img,prob):
+        if(prob>0.5):
+            return img
+        else:
+            # print('size',img.shape)
+            new_size=int((img.shape[0]*(1+prob))//2*2)
+            # print(new_size)
+            new_img=img
+            new_img=cv2.resize(img, (new_size, new_size),interpolation=cv2.INTER_LINEAR)
+            begin=(new_size-img.shape[0])//2
+            end=begin+img.shape[0]
+            new_img=new_img[begin:end,begin:end,:]
+            return new_img
     def mask_images(self,img):
         
         # get landmarks

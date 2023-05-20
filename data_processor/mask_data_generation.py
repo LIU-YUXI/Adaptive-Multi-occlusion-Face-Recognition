@@ -1,7 +1,7 @@
 """
-@author: Hang Du, Jun Wang
-@date: 20201101
-@contact: jun21wangustc@gmail.com
+@author: Yuxi Liu
+@date: 20230401
+@contact: liuyuxi.tongji@gmail.com
 """
 
 import os

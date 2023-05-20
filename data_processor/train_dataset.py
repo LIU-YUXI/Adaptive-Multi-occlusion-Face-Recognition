@@ -12,6 +12,7 @@ import numpy as np
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 from PIL import Image
+import copy
 '''
 landmarks = np.array([[36.2946, 51.5014],
                       [76.5318, 51.5014],
@@ -37,6 +38,7 @@ landmarks = np.array([[45.0, 44.0],
 def transform(image):
     """ Transform a image by cv2.
     """
+    image=cv2.resize(image, (112, 112))
     img_size = image.shape[0]
     # random crop
     if random.random() > 0.5:
@@ -144,7 +146,7 @@ class ImageDataset_SST(Dataset):
         return image1, image2, cur_id
 
 
-class ImageDataset_KD_adapt(Dataset):
+class ImageDataset_KD(Dataset):
     def __init__(self, data_root, train_file, transform=None, preprocess=None):
         self.data_root = data_root
         self.train_list = []
@@ -158,7 +160,7 @@ class ImageDataset_KD_adapt(Dataset):
         self.preprocess = preprocess
         self.mask_img = cv2.imread("mask_img.png", cv2.IMREAD_UNCHANGED)
         self.glass_img = cv2.imread("glass_img3.png", cv2.IMREAD_UNCHANGED)
-        self.sunglass_img = cv2.imread("sunglass_img.png", cv2.IMREAD_UNCHANGED)
+        self.sunglass_img = cv2.imread("sunglass_img2.png", cv2.IMREAD_UNCHANGED)
 
     def __len__(self):
         return len(self.train_list)
@@ -172,7 +174,6 @@ class ImageDataset_KD_adapt(Dataset):
         # return image, image_label
         sample=image
         prob=random.uniform(0, 1)
-        resize_prob=random.uniform(0, 1)
         if (prob<0.33):
             masked_sample=self.mask_images(sample)
             # plt.imshow(masked_sample.astype('uint8'))
@@ -186,11 +187,9 @@ class ImageDataset_KD_adapt(Dataset):
             return masked_sample_t, masked_sample_clip, sample, image_label, 1
         elif (prob<0.66):
             masked_sample=self.mask_images_sunglass(sample)
-            # masked_sample=self.crop_images(masked_sample,resize_prob)
-            # sample=self.crop_images(sample,resize_prob)
             # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
             # 保存PIL Image对象为图片
-            # img.save('./out_pic_sunglasses/a_img%d.jpg'%index)
+            # img.save('./out_pic_sunglasses/b_img%d.jpg'%index)
             # plt.savefig('./out_pic/img%d.jpg'%index)
             if self.transform is not None:
                 sample = self.transform(sample)
@@ -199,6 +198,488 @@ class ImageDataset_KD_adapt(Dataset):
                 masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
             return masked_sample_t, masked_sample_clip, sample, image_label, 2
         else:
+            if self.transform is not None:
+                sample_t = self.transform(sample)
+            if self.preprocess is not None:
+             sample_clip=self.preprocess(Image.fromarray(np.uint8(sample)))
+            return sample_t,sample_clip,sample_t,image_label, 0
+    
+    def mask_images(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        rs = np.random.randint(-40,40)
+        rx = np.random.randint(-10,10)
+        # rs=0
+        # rx=0
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.mask_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def mask_images_glass(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        # rs = np.random.randint(-40,40)
+        # rx = np.random.randint(-10,10)
+        rs = 0
+        rx = 0
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([678+rx,464+rs]), 
+                            np.array([548+rx,614+rs]), 
+                            np.array([991+rx,664+rs]), 
+                            np.array([1009+rx,64+rs]), 
+                            np.array([557+rx,64+rs])], dtype="float32")
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.glass_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def mask_images_sunglass(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        # rs = np.random.randint(-40,40)
+        # rx = np.random.randint(-10,10)
+        rs = 0
+        rx = 0
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([678+rx,464+rs]), 
+                            np.array([548+rx,614+rs]), 
+                            np.array([991+rx,664+rs]), 
+                            np.array([1009+rx,64+rs]), 
+                            np.array([557+rx,64+rs])], dtype="float32")
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.sunglass_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def cymk_to_rgb(self, img):
+        cyan = img[:,:,0] 
+        magenta = img[:,:,1] 
+        yellow = img[:,:,2] 
+        black = img[:,:,3]
+        
+        scale = 100
+        red = 255*(1.0-(cyan+black)/float(scale))
+        green = 255*(1.0-(magenta+black)/float(scale))
+        blue = 255*(1.0-(yellow+black)/float(scale))
+            
+        rgbimg = np.stack((red, green, blue))
+        rgbimg = np.moveaxis(rgbimg, 0, 2)
+        return rgbimg
+
+class ImageDataset_KD_glasses(Dataset):
+    def __init__(self, data_root, train_file, transform=None, preprocess=None):
+        self.data_root = data_root
+        self.train_list = []
+        train_file_buf = open(train_file)
+        line = train_file_buf.readline().strip()
+        while line:
+            image_path, image_label = line.split(' ')
+            self.train_list.append((image_path, int(image_label)))
+            line = train_file_buf.readline().strip()
+        self.transform = transform
+        self.preprocess = preprocess
+        self.mask_img = cv2.imread("mask_img.png", cv2.IMREAD_UNCHANGED)
+        self.glass_img = cv2.imread("glass_img3.png", cv2.IMREAD_UNCHANGED)
+        self.sunglass_img = cv2.imread("sunglass_img2.png", cv2.IMREAD_UNCHANGED)
+
+    def __len__(self):
+        return len(self.train_list)
+    def __getitem__(self, index):
+        image_path, image_label = self.train_list[index]
+        image_path = os.path.join(self.data_root, image_path)
+        image = cv2.imread(image_path)
+        image = cv2.resize(image, (112, 112)) #128 * 128
+        if image.ndim == 2:
+            image = image[:, :, np.newaxis]
+        # return image, image_label
+        sample=image
+        prob=random.uniform(0, 1)
+        if (prob<0.33):
+            masked_sample=self.mask_images(sample)
+            # plt.imshow(masked_sample.astype('uint8'))
+            # 保存图片
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+             sample = self.transform(sample)
+             masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+             masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 1
+        elif (prob<0.66):
+            masked_sample=self.mask_images_glass(sample)
+            # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            # img.save('./out_pic_sunglasses/b_img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+                sample = self.transform(sample)
+                masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+                masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 2
+        else:
+            if self.transform is not None:
+                sample_t = self.transform(sample)
+            if self.preprocess is not None:
+             sample_clip=self.preprocess(Image.fromarray(np.uint8(sample)))
+            return sample_t,sample_clip,sample_t,image_label, 0
+    def mask_images(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        rs = np.random.randint(-40,40)
+        rx = np.random.randint(-10,10)
+        # rs=0
+        # rx=0
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.mask_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+    def mask_images_glass(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        # rs = np.random.randint(-40,40)
+        # rx = np.random.randint(-10,10)
+        rs = 0
+        rx = 0
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([678+rx,464+rs]), 
+                            np.array([548+rx,614+rs]), 
+                            np.array([991+rx,664+rs]), 
+                            np.array([1009+rx,64+rs]), 
+                            np.array([557+rx,64+rs])], dtype="float32")
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.glass_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def cymk_to_rgb(self, img):
+        cyan = img[:,:,0] 
+        magenta = img[:,:,1] 
+        yellow = img[:,:,2] 
+        black = img[:,:,3]
+        
+        scale = 100
+        red = 255*(1.0-(cyan+black)/float(scale))
+        green = 255*(1.0-(magenta+black)/float(scale))
+        blue = 255*(1.0-(yellow+black)/float(scale))
+            
+        rgbimg = np.stack((red, green, blue))
+        rgbimg = np.moveaxis(rgbimg, 0, 2)
+        return rgbimg
+
+class ImageDataset_KD_glasses_sunglasses(Dataset):
+    def __init__(self, data_root, train_file, transform=None, preprocess=None):
+        self.data_root = data_root
+        self.train_list = []
+        train_file_buf = open(train_file)
+        line = train_file_buf.readline().strip()
+        while line:
+            image_path, image_label = line.split(' ')
+            self.train_list.append((image_path, int(image_label)))
+            line = train_file_buf.readline().strip()
+        self.transform = transform
+        self.preprocess = preprocess
+        self.mask_img = cv2.imread("mask_img.png", cv2.IMREAD_UNCHANGED)
+        self.glass_img = cv2.imread("glass_img3.png", cv2.IMREAD_UNCHANGED)
+        self.sunglass_img = cv2.imread("sunglass_img2.png", cv2.IMREAD_UNCHANGED)
+
+    def __len__(self):
+        return len(self.train_list)
+    def __getitem__(self, index):
+        image_path, image_label = self.train_list[index]
+        image_path = os.path.join(self.data_root, image_path)
+        image = cv2.imread(image_path)
+        image = cv2.resize(image, (112, 112)) #128 * 128
+        if image.ndim == 2:
+            image = image[:, :, np.newaxis]
+        # return image, image_label
+        sample=image
+        prob=random.uniform(0, 1)
+        # resize_prob=random.uniform(0, 0.25)
+        masked_sample_clip=sample
+        sample_clip=sample
+        if (prob<0.25):
+            masked_sample=self.mask_images(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            # plt.imshow(masked_sample.astype('uint8'))
+            # 保存图片
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+             sample = self.transform(sample)
+             masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+             masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 1
+        elif (prob<0.5):
+            masked_sample=self.mask_images_glass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            # img.save('./out_pic_sunglasses/b_img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+                sample = self.transform(sample)
+                masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+                masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 2
+        elif (prob<0.75):
+            masked_sample=self.mask_images_sunglass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            # img.save('./out_pic_sunglasses/b_img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+                sample = self.transform(sample)
+                masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+                masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 3
+        else:
+            # sample=self.crop_images(sample,resize_prob)
             if self.transform is not None:
                 sample_t = self.transform(sample)
             if self.preprocess is not None:
@@ -423,8 +904,62 @@ class ImageDataset_KD_adapt(Dataset):
         rgbimg = np.moveaxis(rgbimg, 0, 2)
         return rgbimg
 
-class ImageDataset_KD(Dataset):
-    def __init__(self, data_root, train_file, transform=None, preprocess=None):
+class ImageDataset_HSST(Dataset):
+    def __init__(self, data_root,data_mask_root, train_file, exclude_id_set):
+        self.data_root = data_root
+        self.data_mask_root = data_mask_root
+        label_set = set()
+        # get id2image_path_nir_list & id2image_path_vis_list
+        self.id2image_path_nir_list = {}
+        self.id2image_path_vis_list = {}
+        train_file_buf = open(train_file)
+        line = train_file_buf.readline().strip()
+        while line:
+            vis_img_path, label = line.split(' ')
+            nir_img_path = vis_img_path
+            '''
+            path_list = nir_img_path.split('/')
+            path_list[-3]+='_random_mask'
+            nir_img_path = '/'
+            nir_img_path = nir_img_path+'/'+path_liss_one for path_liss_one in path_list
+            print(nir_img_path)
+            '''
+            label = int(label)
+            if label in exclude_id_set:
+                line = train_file_buf.readline().strip()
+                continue
+            label_set.add(label)
+            if not label in self.id2image_path_nir_list:
+                self.id2image_path_nir_list[label] = []
+            if not label in self.id2image_path_vis_list:
+                self.id2image_path_vis_list[label] = []
+            self.id2image_path_nir_list[label].append(nir_img_path)
+            self.id2image_path_vis_list[label].append(vis_img_path)
+            line = train_file_buf.readline().strip()
+
+        self.train_list = list(label_set)
+        # print(self.train_list,self.id2image_path_nir_list,self.id2image_path_vis_list)
+        print('Valid ids: %d.' % len(self.train_list))
+            
+    def __len__(self):
+        return len(self.train_list)
+
+    def __getitem__(self, index):
+        cur_id = self.train_list[index]
+        cur_image_path_nir_list = list(set(self.id2image_path_nir_list[cur_id]))
+        cur_image_path_vis_list = list(set(self.id2image_path_vis_list[cur_id]))
+        nir_path = random.sample(cur_image_path_nir_list, 1)[0]
+        vis_path = random.sample(cur_image_path_vis_list, 1)[0]
+        nir_path = os.path.join(self.data_mask_root, nir_path)
+        vis_path = os.path.join(self.data_root, vis_path)
+        nir_image = cv2.imread(nir_path)
+        vis_image = cv2.imread(vis_path)
+        nir_image = transform(nir_image)
+        vis_image = transform(vis_image)
+
+        return nir_image, vis_image, cur_id
+class ImageDataset_KD_glasses_sunglasses_one(Dataset):
+    def __init__(self, data_root, train_file,mask_type='mask', transform=None, preprocess=None):
         self.data_root = data_root
         self.train_list = []
         train_file_buf = open(train_file)
@@ -435,9 +970,10 @@ class ImageDataset_KD(Dataset):
             line = train_file_buf.readline().strip()
         self.transform = transform
         self.preprocess = preprocess
+        self.mask_type = mask_type
         self.mask_img = cv2.imread("mask_img.png", cv2.IMREAD_UNCHANGED)
         self.glass_img = cv2.imread("glass_img3.png", cv2.IMREAD_UNCHANGED)
-        self.sunglass_img = cv2.imread("sunglass_img.png", cv2.IMREAD_UNCHANGED)
+        self.sunglass_img = cv2.imread("sunglass_img2.png", cv2.IMREAD_UNCHANGED)
 
     def __len__(self):
         return len(self.train_list)
@@ -451,8 +987,17 @@ class ImageDataset_KD(Dataset):
         # return image, image_label
         sample=image
         prob=random.uniform(0, 1)
-        if (prob<0.5):
+        # resize_prob=random.uniform(0, 0.25)
+        masked_sample_clip=sample
+        sample_clip=sample
+        if (prob<=0.5):
+            mask_type=self.mask_type
+        else:
+            mask_type=None
+        if (mask_type=='mask'):
             masked_sample=self.mask_images(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
             # plt.imshow(masked_sample.astype('uint8'))
             # 保存图片
             # plt.savefig('./out_pic/img%d.jpg'%index)
@@ -461,14 +1006,348 @@ class ImageDataset_KD(Dataset):
              masked_sample_t=self.transform(masked_sample)
             if self.preprocess is not None:
              masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
-            return masked_sample_t, sample, image_label, 1
+            # print('mask')
+            return masked_sample_t, masked_sample_clip, sample, image_label, 1
+        elif (mask_type=='glasses'):
+            masked_sample=self.mask_images_glass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            # img.save('./out_pic_sunglasses/b_img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+                sample = self.transform(sample)
+                masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+                masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 2
+        elif (mask_type=='sunglasses'):
+            masked_sample=self.mask_images_sunglass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            # img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            # img.save('./out_pic_sunglasses/b_img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            if self.transform is not None:
+                sample = self.transform(sample)
+                masked_sample_t=self.transform(masked_sample)
+            if self.preprocess is not None:
+                masked_sample_clip=self.preprocess(Image.fromarray(np.uint8(masked_sample)))
+            return masked_sample_t, masked_sample_clip, sample, image_label, 3
         else:
+            # sample=self.crop_images(sample,resize_prob)
             if self.transform is not None:
                 sample_t = self.transform(sample)
             if self.preprocess is not None:
              sample_clip=self.preprocess(Image.fromarray(np.uint8(sample)))
-            return sample_t,sample_t,image_label, 0
+            # print('no mask')
+            return sample_t,sample_clip,sample_t,image_label, 0
+    def crop_images(self,img,prob):
+        if(prob>0.5):
+            return img
+        else:
+            # print('size',img.shape)
+            new_size=int((img.shape[0]*(1+prob))//2*2)
+            # print(new_size)
+            new_img=img
+            new_img=cv2.resize(img, (new_size, new_size),interpolation=cv2.INTER_LINEAR)
+            begin=(new_size-img.shape[0])//2
+            end=begin+img.shape[0]
+            new_img=new_img[begin:end,begin:end,:]
+            return new_img
+    def mask_images(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
     
+        #apply random shift of fakemask
+        rs = np.random.randint(-40,40)
+        rx = np.random.randint(-10,10)
+        # rs=0
+        # rx=0
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.mask_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def mask_images_glass(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        # rs = np.random.randint(-40,40)
+        # rx = np.random.randint(-10,10)
+        rs = 0
+        rx = 0
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([678+rx,464+rs]), 
+                            np.array([548+rx,614+rs]), 
+                            np.array([991+rx,664+rs]), 
+                            np.array([1009+rx,64+rs]), 
+                            np.array([557+rx,64+rs])], dtype="float32")
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.glass_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def mask_images_sunglass(self,img):
+        
+        # get landmarks
+        nose = (landmarks[2][0], landmarks[2][1])
+        mouth_left = (landmarks[4][0], landmarks[4][1])
+        mouth_right = (landmarks[3][0], landmarks[3][1])
+        eye_left = (landmarks[1][0], landmarks[1][1])
+        eye_right = (landmarks[0][0], landmarks[0][1])
+    
+        #apply random shift of fakemask
+        # rs = np.random.randint(-40,40)
+        # rx = np.random.randint(-10,10)
+        rs = 0
+        rx = 0
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([678+rx,464+rs]), 
+                            np.array([548+rx,614+rs]), 
+                            np.array([991+rx,664+rs]), 
+                            np.array([1009+rx,64+rs]), 
+                            np.array([557+rx,64+rs])], dtype="float32")
+        '''
+        #keypoints of mask image
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
+                            np.array([580+rx,614+rs+20*1]), 
+                            np.array([1047+rx,614+rs+20*1]), 
+                            np.array([967+rx,150+rs-20*5]), 
+                            np.array([660+rx,150+rs-20*5])], dtype="float32")
+        #landmark of image
+        dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
+                           np.array([int(mouth_left[0]), int(mouth_left[1])]), 
+                           np.array([int(mouth_right[0]), int(mouth_right[1])]), 
+                           np.array([int(eye_right[0]), int(eye_right[1])]), 
+                           np.array([int(eye_left[0]), int(eye_left[1])])], dtype='float32')
+
+        # compute perspective transformation matrix. src_pts -> dst_pts
+        # The output matrix is used in next step for the transformation of 
+        # the mask to an output-mask which fits to the landmark of the image
+        M, _ = cv2.findHomography(src_pts, dst_pts)
+    
+        # transform the mask to a mask which fits to the image
+        transformed_mask = cv2.warpPerspective(
+                         self.sunglass_img,
+                         M,
+                         (img.shape[1], img.shape[0]),
+                         None,
+                         cv2.INTER_LINEAR,
+                         cv2.BORDER_CONSTANT)
+ 
+        # overlay the image with the fitting mask
+        alpha_mask = transformed_mask[:, :, 3] / 255
+        alpha_image = np.abs(1 - alpha_mask)
+        
+        # fix mask values
+        transformed_mask = transformed_mask / 255 * 100
+        
+        # add color to masks
+        transformed_mask = self.cymk_to_rgb(transformed_mask)
+        random_value = np.random.randint(0,150,3)
+        transformed_mask = transformed_mask + random_value
+        
+        for c in range(0, 3):
+            img[:, :, c] = (alpha_mask * transformed_mask[:, :, c] + alpha_image * img[:, :, c])
+
+        return img
+
+    def cymk_to_rgb(self, img):
+        cyan = img[:,:,0] 
+        magenta = img[:,:,1] 
+        yellow = img[:,:,2] 
+        black = img[:,:,3]
+        
+        scale = 100
+        red = 255*(1.0-(cyan+black)/float(scale))
+        green = 255*(1.0-(magenta+black)/float(scale))
+        blue = 255*(1.0-(yellow+black)/float(scale))
+            
+        rgbimg = np.stack((red, green, blue))
+        rgbimg = np.moveaxis(rgbimg, 0, 2)
+        return rgbimg
+        
+class ImageDataset_KD_glasses_sunglasses_save(Dataset):
+    def __init__(self, data_root, train_file, transform=None, preprocess=None):
+        self.data_root = data_root
+        self.train_list = []
+        train_file_buf = open(train_file)
+        line = train_file_buf.readline().strip()
+        while line:
+            image_path, image_label = line.split(' ')
+            self.train_list.append((image_path, int(image_label)))
+            line = train_file_buf.readline().strip()
+        self.transform = transform
+        self.preprocess = preprocess
+        self.mask_img = cv2.imread("mask_img.png", cv2.IMREAD_UNCHANGED)
+        self.glass_img = cv2.imread("glass_img3.png", cv2.IMREAD_UNCHANGED)
+        self.sunglass_img = cv2.imread("sunglass_img2.png", cv2.IMREAD_UNCHANGED)
+
+    def __len__(self):
+        return len(self.train_list)
+    def __getitem__(self, index):
+        image_path, image_label = self.train_list[index]
+        image_path = os.path.join(self.data_root, image_path)
+        image = cv2.imread(image_path)
+        image = cv2.resize(image, (112, 112)) #128 * 128
+        if image.ndim == 2:
+            image = image[:, :, np.newaxis]
+        # return image, image_label
+        sample=copy.deepcopy(image)
+        prob=random.uniform(0, 1)
+        # resize_prob=random.uniform(0, 0.25)
+        masked_sample_clip=sample
+        sample_clip=sample
+        if (1):
+            sample=copy.deepcopy(image)
+            masked_sample=self.mask_images(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            img.save('./out_pic_case/maskimg%d.jpg'%index)
+            # print('mask')
+            # return masked_sample_t, masked_sample_clip, sample, image_label, 1
+        if (1):
+            sample=copy.deepcopy(image)
+            masked_sample=self.mask_images_glass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            img.save('./out_pic_case/glassimg%d.jpg'%index)
+            # return masked_sample_t, masked_sample_clip, sample, image_label, 2
+        if (1):
+            sample=copy.deepcopy(image)
+            masked_sample=self.mask_images_sunglass(sample)
+            # masked_sample=self.crop_images(masked_sample,resize_prob)
+            # sample=self.crop_images(sample,resize_prob)
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            img.save('./out_pic_case/sunglass_img%d.jpg'%index)
+            # plt.savefig('./out_pic/img%d.jpg'%index)
+            # return masked_sample_t, masked_sample_clip, sample, image_label, 3
+        if(1):
+            sample=copy.deepcopy(image)
+            img = Image.fromarray(sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            img.save('./out_pic_case/img%d.jpg'%index)
+            # sample=self.crop_images(sample,resize_prob)
+            if self.transform is not None:
+                sample_t = self.transform(sample)
+            if self.preprocess is not None:
+             sample_clip=self.preprocess(Image.fromarray(np.uint8(sample)))
+            # print('no mask')
+            return sample_t,sample_clip,sample_t,image_label, 0
+    def crop_images(self,img,prob):
+        if(prob>0.5):
+            return img
+        else:
+            # print('size',img.shape)
+            new_size=int((img.shape[0]*(1+prob))//2*2)
+            # print(new_size)
+            new_img=img
+            new_img=cv2.resize(img, (new_size, new_size),interpolation=cv2.INTER_LINEAR)
+            begin=(new_size-img.shape[0])//2
+            end=begin+img.shape[0]
+            new_img=new_img[begin:end,begin:end,:]
+            return new_img
     def mask_images(self,img):
         
         # get landmarks

@@ -18,6 +18,7 @@ run [./train.sh](./training_mode/conventional_training/train.sh) with the train 
 
 ## Model Test
 
-run [./test_lfw_adapt.sh](./test_protocol/test_lfw_adapt.sh) with the test dataset LFW-MASK ([baidu Pan Link](https://pan.baidu.com/s/1P0Ke5H7IDiCijhneyJnAhQ?pwd=kkc8))
+run [./test_lfw_adapt.sh](./test_protocol/test_lfw_adapt.sh) with the test dataset LFW-MASK ([baidu Pan Link](https://pan.baidu.com/s/1P0Ke5H7IDiCijhneyJnAhQ?pwd=kkc8)), or the dataset MEGLSS([baidu Pan Link](https://pan.baidu.com/s/1r_7O0GxDkEMNkb4Kvty_9A?pwd=wg1m)), CALFW-SUNGLASSES([baidu Pan Link](https://pan.baidu.com/s/1maGEKvjG1kbcusEsek1hRA?pwd=f0py)), CPLFW([baidu Pan Link](https://pan.baidu.com/s/1gJ8659xUhG-gcOZ4fMS6XA?pwd=6wmo))
 
-
+## Simulate occlusion generation
+You can generate a new simulated occluded dataset by running the python file [mask_data_generation.py](./data_processor/mask_data_generation.py) and changing the dataset path and occlusion image in the file.

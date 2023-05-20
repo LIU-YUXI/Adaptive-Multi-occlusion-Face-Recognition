@@ -29,7 +29,7 @@ landmarks = np.array([[30.2946, 51.6963],
                       ], dtype=np.float32 )
 '''
 # for CALFW-glasses
-landmarks = np.array([[45.0, 44.0+5],
+landmarks0 = np.array([[45.0, 44.0+5],
                       [67.0, 44.0+5],
                       [56.0, 62.0+5],
                       [41.0, 78.0+5],
@@ -38,7 +38,7 @@ landmarks = np.array([[45.0, 44.0+5],
 
 
 class MaskData(object):
-    def __init__(self, data_root, train_file, landmark_root):
+    def __init__(self, data_root, train_file, landmark_root=None):
         self.data_root = data_root
         self.data_save_root = data_root+'_'
         self.train_list = []
@@ -51,7 +51,7 @@ class MaskData(object):
             line = train_file_buf.readline().strip()
         self.mask_img = cv2.imread("mask_img.png", cv2.IMREAD_UNCHANGED)
         self.glass_img = cv2.imread("glass_img3.png", cv2.IMREAD_UNCHANGED)
-        self.sunglass_img = cv2.imread("sunglass_img.png", cv2.IMREAD_UNCHANGED)
+        self.sunglass_img = cv2.imread("sunglass_img2.png", cv2.IMREAD_UNCHANGED)
     def __len__(self):
         return len(self.train_list)
     def __maskitem__(self, index, mask_type):
@@ -70,7 +70,7 @@ class MaskData(object):
         # return image, image_label
         sample=image
         if (mask_type=='mask'):
-            masked_sample=self.mask_images(sample)
+            masked_sample=self.mask_images(sample,landmarks=self.get_landmark(image_path))
             # plt.imshow(masked_sample.astype('uint8'))
             # 将numpy数组转换为PIL Image对象
             img = Image.fromarray(masked_sample[:,:,[2,1,0]])
@@ -92,19 +92,74 @@ class MaskData(object):
             # 保存PIL Image对象为图片
             # print(image_save_path)
             img.save(image_save_path)
-    def generate(self, mask_type):
-        self.data_save_root = self.data_root+'_random_'+mask_type
-        if not os.path.exists(self.data_save_root):
-            os.makedirs(self.data_save_root)
-        print(self.data_save_root)
-        for index in range(self.__len__()):
-            self.__maskitem__(index, mask_type)
-            # print(index)
-            '''
-            if index==100:
-                return
-            '''
+    def __maskitem_prob__(self, index):
+        image_path = self.train_list[index]
+        image_save_path = os.path.join(self.data_save_root, image_path)        
+        image_path = os.path.join(self.data_root, image_path)
+        # print(self.data_save_root,image_save_path)
+        folder_path = os.path.dirname(image_save_path)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        image = cv2.imread(image_path)
+        # image[25:225, 25:225]
+        image = cv2.resize(image, (112, 112)) #128 * 128
+        if image.ndim == 2:
+            image = image[:, :, np.newaxis]
+        # return image, image_label
+        sample=image
+        prob=random.uniform(0, 3)
+        if(prob<=1):
+            mask_type='mask'
+        elif (prob<=2):
+            mask_type='glasses'
+        else:
+            mask_type='sunglasses'
+        if (mask_type=='mask'):
+            masked_sample=self.mask_images(sample,landmarks=self.get_landmark(image_path))
+            # plt.imshow(masked_sample.astype('uint8'))
+            # 将numpy数组转换为PIL Image对象
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # 保存PIL Image对象为图片
+            img.save(image_save_path)
+        elif (mask_type=='glasses'):
+            # print(image_save_path)
+            masked_sample=self.mask_images_glass(sample,landmarks=self.get_landmark(image_path))
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # image = cv2.resize(image, (112, 112))
+            # 保存PIL Image对象为图片
+            # print(image_save_path)
+            img.save(image_save_path)
+        elif (mask_type=='sunglasses'):
+            # print(image_save_path)
+            masked_sample=self.mask_images_sunglass(sample,landmarks=self.get_landmark(image_path))
+            img = Image.fromarray(masked_sample[:,:,[2,1,0]])
+            # image = cv2.resize(image, (112, 112))
+            # 保存PIL Image对象为图片
+            # print(image_save_path)
+            img.save(image_save_path)
+    def generate(self, mask_type=None):
+        if(mask_type==None):
+            self.data_save_root = self.data_root+'_random_mask'
+            if not os.path.exists(self.data_save_root):
+                os.makedirs(self.data_save_root)
+            print(self.data_save_root)
+            for index in range(self.__len__()):
+                self.__maskitem_prob__(index)
+                #if index==100:
+                #    return
+        else:
+            self.data_save_root = self.data_root+'_random_'+mask_type+'2'
+            if not os.path.exists(self.data_save_root):
+                os.makedirs(self.data_save_root)
+            print(self.data_save_root)
+            for index in range(self.__len__()):
+                self.__maskitem__(index, mask_type)
+                #print(index)
+                #if index==10:
+                #    return
     def get_landmark(self, file_path):
+        if self.landmark_root==None:
+            return landmarks0
         filename=os.path.basename(file_path)
         filename=filename[:-4]+'_5loc_attri.txt'
         file_path_new = os.path.join(self.landmark_root,filename)
@@ -118,7 +173,7 @@ class MaskData(object):
             line = train_file_buf.readline().strip()
         # print(landmarks)
         return landmarks
-    def mask_images(self,img):
+    def mask_images(self,img,landmarks):
         # get landmarks
         nose = (landmarks[2][0], landmarks[2][1])
         mouth_left = (landmarks[4][0], landmarks[4][1])
@@ -132,12 +187,18 @@ class MaskData(object):
         # rs=0
         # rx=0
         #keypoints of mask image
+        '''
         src_pts = np.array([np.array([813.5+rx,450+rs+20*1]), 
                             np.array([580+rx,614+rs+20*1]), 
                             np.array([1047+rx,614+rs+20*1]), 
                             np.array([967+rx,150+rs-20*5]), 
                             np.array([660+rx,150+rs-20*5])], dtype="float32")
-
+        '''
+        src_pts = np.array([np.array([813.5+rx,450+rs+20*1-20*4]), 
+                            np.array([580+rx,614+rs+20*1-20*4]), 
+                            np.array([1047+rx,614+rs+20*1-20*4]), 
+                            np.array([967+rx+60,150+rs-20*5+20*4]), 
+                            np.array([660+rx-60,150+rs-20*5+20*4])], dtype="float32")
         #landmark of image
         dst_pts= np.array([np.array([int(nose[0]), int(nose[1])]), 
                            np.array([int(mouth_left[0]), int(mouth_left[1])]), 
@@ -324,9 +385,16 @@ class MaskData(object):
         return rgbimg
 
 if __name__ == '__main__':
+    random.seed(0)
+    np.random.seed(0)
     cropped_face_folder= "/CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_reid"
     image_list_file_path= '/CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_train_list.txt'
     landmarks_root="/CIS20/lyx/FaceX-Zoo-main-new/test_data/CA_landmarks/"
+    '''
+    cropped_face_folder= "/CIS20/lyx/FaceX-Zoo-main-new/data/CASIA-WebFace"
+    image_list_file_path= '/CIS20/lyx/FaceX-Zoo-main-new/training_mode/webface_train_list.txt'
+    landmarks_root=None
+    '''
     MD=MaskData(cropped_face_folder,image_list_file_path,landmark_root=landmarks_root)
     print('begin!')
     MD.generate('sunglasses')

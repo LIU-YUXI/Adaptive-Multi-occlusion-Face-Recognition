@@ -261,7 +261,7 @@ def train(conf):
     '''
     data
     '''
-    data_loader = DataLoader(ImageDataset_KD_glasses_sunglasses_save(conf.data_root, conf.train_file,transform=transform,preprocess=preprocess), 
+    data_loader = DataLoader(ImageDataset_KD_glasses_sunglasses(conf.data_root, conf.train_file,transform=transform,preprocess=preprocess), 
                                conf.batch_size, True, num_workers = 4)
     '''
     teacher

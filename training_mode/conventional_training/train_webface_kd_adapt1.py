@@ -90,11 +90,16 @@ class Adapt_Layer(torch.nn.Module):
         self.category_num=category_num
         # self.linears = nn.ModuleList([Adapter(embedding_dim) for i in range(category_num)])
         self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
+        self.pred_weight_fc = nn.Parameter(torch.empty(1))
+        self.feature_weight_fc = nn.Parameter(torch.empty(1))
+        torch.nn.init.normal_(self.pred_weight_fc)
+        torch.nn.init.normal_(self.feature_weight_fc)
         # self.pred_weight_fc = nn.Linear(embedding_dim,1)
         # self.feature_weight_fc = nn.Linear(embedding_dim,1)
         # self.relus = nn.ModuleList([nn.ReLU(inplace=True) for i in range(category_num)])
         # self.relu=nn.ReLU(inplace=True)
         # self.leakyrelus = nn.ModuleList([nn.LeakyReLU(negative_slope=0.5, inplace=False) for i in range(category_num)])
+        # self.fc = nn.Linear(embedding_dim,embedding_dim)
     def forward(self, feature, prob):
         feature_list=[]
         for m in self.linears:
@@ -104,13 +109,14 @@ class Adapt_Layer(torch.nn.Module):
         feature_list=torch.cat(feature_list,-1)
         # print(feature_list.shape)
         pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        return pred + feature
+        # return pred + feature
+        # return self.fc(pred) + feature
         # pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
         # feature_weight=torch.sigmoid(self.feature_weight_fc(feature))
         # ratio = 0.2
         # ratio=pred_weight/(pred_weight+feature_weight+1e-8)
         # return ratio*(pred) + (1-ratio)*feature# self.relu(pred) + feature
-        # return pred_weight*pred + feature_weight*feature
+        return (self.pred_weight_fc)*pred + (self.feature_weight_fc)*feature
 '''
 class Adapt_Layer(torch.nn.Module):
     def __init__(self, embedding_dim, category_num):
@@ -163,11 +169,13 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
         thetas = header(features_adapt, labels)
         # print(gloss.shape), gloss+gloss.sum()
         loss_v1 = criterion(thetas, labels)
-        loss_v2 = 10*conf.w*(criterion2(features_student, features_teacher))+conf.w*(criterion3(features_adapt, features_teacher))
+        loss_v2 = conf.w*(criterion2(features_adapt, features_teacher))+10*conf.w*(criterion3(features_student, features_teacher))
         loss_v = loss_v1 + loss_v2
         loss_v.backward()#compute
 
         clip_grad_norm_(backbone_student.parameters(), max_norm=5, norm_type=2)
+        adapt_model.pred_weight_fc.data.clamp_(min=0.0,max=5.0)
+        adapt_model.feature_weight_fc.data.clamp_(min=0.0,max=5.0)
         # clip_grad_norm_(adapt_model.parameters(), max_norm=5, norm_type=2)
         model_optimizer.step()
         header_optimizer.step()#update

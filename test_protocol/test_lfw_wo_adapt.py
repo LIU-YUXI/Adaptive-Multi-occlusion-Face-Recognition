@@ -25,21 +25,6 @@ import numpy as np
 import torch.nn as nn
 def accu_key(elem):
     return elem[1]
-class Adapt_Layer(torch.nn.Module):
-    def __init__(self, embedding_dim, category_num):
-        super(Adapt_Layer, self).__init__()
-        self.embedding_dim=embedding_dim
-        self.category_num=category_num
-        self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
-
-    def forward(self, feature, prob):
-        feature_list=[]
-        for m in self.linears:
-            feature_list.append(m(feature).unsqueeze(-1))
-        feature_list=torch.cat(feature_list,-1)
-        # print(feature_list.shape)
-        pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        return pred
 
 class FaceModel(torch.nn.Module):
     """Define a traditional face model which contains a backbone and a head.
@@ -49,19 +34,12 @@ class FaceModel(torch.nn.Module):
         head(object): the adapt layer of face model.
         clip_model(object)
     """
-    def __init__(self, backbone, adapt, clip_model, text):
+    def __init__(self, backbone):
         super(FaceModel, self).__init__()
         self.backbone = backbone
-        self.adapt =adapt
-        self.clip_model = clip_model
-        self.text =text
 
     def forward(self, data, data_clip):
         pred = self.backbone.forward(data)
-        # logits_per_image, logits_per_text = self.clip_model(data_clip, self.text)
-        # prob = logits_per_image.softmax(dim=-1)
-        # prob = torch.tensor([[1.0,0]]*data.shape[0], dtype=torch.float32).to(data.device)
-        # pred = self.adapt.forward(pred,prob)
         return pred
 
 if __name__ == '__main__':
@@ -94,9 +72,6 @@ if __name__ == '__main__':
 
     clip_model, preprocess = clip.load("RN50x16", device=torch.device(args.device))
     clip_model.eval()
-    text = clip.tokenize(["A human face","A human face in a mask" ]).to(args.device)
-    args.category_mum = text.shape[0]
-    print("mask category num:",args.category_mum)
 
     # define pairs_parser_factory
     pairs_parser_factory = PairsParserFactory(pairs_file_path, args.test_set)
@@ -108,8 +83,6 @@ if __name__ == '__main__':
     model_loader = iresnet100(num_features=args.embedding_size)# ModelLoader(backbone_factory)
     feature_extractor = CommonExtractor(args.device)
     lfw_evaluator = LFWEvaluator(data_loader, pairs_parser_factory, feature_extractor)
-
-    adapt_model = Adapt_Layer(args.embedding_size,args.category_mum)
     if os.path.isdir(args.model_path):
         accu_list = []
         model_name_list = os.listdir(args.model_path)
@@ -122,11 +95,9 @@ if __name__ == '__main__':
                 accu_list.append((os.path.basename(model_path), mean, std))
         accu_list.sort(key = accu_key, reverse=True)
     else:
-        model_loader.load_state_dict(torch.load(args.model_path,map_location='cpu'))# ['state_dict']
+        model_loader.load_state_dict(torch.load(args.model_path,map_location='cpu')['state_dict'])# 
         model = model_loader.cuda(args.device)
-        adapt_model.load_state_dict(torch.load(args.adapt_path,map_location='cpu')['state_dict'])
-        adapt_model = adapt_model.cuda(args.device)
-        test_model = FaceModel(model,adapt_model,clip_model,text)
+        test_model = FaceModel(model)
         mean, std = lfw_evaluator.test(test_model)
         accu_list = [(os.path.basename(args.model_path), mean, std)]
     pretty_tabel = PrettyTable(["model_name", "mean accuracy", "standard error"])

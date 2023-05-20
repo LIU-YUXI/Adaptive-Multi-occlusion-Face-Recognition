@@ -2,21 +2,29 @@ LFW:
     pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/lfw_mask_new/pairs.txt
     cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/lfw_mask_new/crop_mask_img
     image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/lfw_mask_new/img_list.txt
-
+CASE:
+    pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/lfw_mask_new/pairs.txt
+    cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/case
+    image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/case_list.txt
 MEGLASS:
     pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/glasses_pairs.txt
     cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/MeGlass_120x120_reid
     image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/glass_train_list.txt
 
 CPLFW:
-    pairs_file_path: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/cplfw/ori_data/pairs_CPLFW.txt
-    cropped_face_folder: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/cplfw/cplfw_crop
-    image_list_file_path: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/cplfw/img_list.txt
+    pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CPLFW_pairs.txt
+    cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CPLFW_reid
+    image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CPLFW_train_list.txt
 
-CALFW:
-    pairs_file_path: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/calfw/ori_data/pairs_CALFW.txt
-    cropped_face_folder: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/calfw/calfw_crop
-    image_list_file_path: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/calfw/img_list.txt
+CALFW_GLASSES:
+    pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_pairs.txt
+    cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_reid_glasses
+    image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_train_list.txt
+
+CALFW_SUNGLASSES:
+    pairs_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_pairs.txt
+    cropped_face_folder: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_reid_random_sunglasses
+    image_list_file_path: /CIS20/lyx/FaceX-Zoo-main-new/test_data/CALFW_train_list.txt
 
 AgeDB30:
     pairs_file_path: /export2/wangjun492/face_database/facex-zoo/private_file/test_data/agedb/AgeDB_FINAL_protocol/04_FINAL_protocol_30_years.mat

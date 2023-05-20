@@ -19,8 +19,17 @@ from data_processor.test_dataset import CommonTestDataset
 from backbone.backbone_def import BackboneFactory
 from backbone.iresnet import iresnet100
 import torch
+import clip
+import random
+import numpy as np
+import torch.nn as nn
+import torch.nn.functional as F
+from backbone.SRT.model import SingleLayerModel
+sys.path.append('/CIS20/lyx/Self-restrained-Triplet-Loss-master')
+from facenet_pytorch import InceptionResnetV1
 def accu_key(elem):
     return elem[1]
+
 class FaceModel(torch.nn.Module):
     """Define a traditional face model which contains a backbone and a head.
     
@@ -36,6 +45,7 @@ class FaceModel(torch.nn.Module):
     def forward(self, data, data_clip):
         pred = self.backbone.forward(data)
         return pred
+
 if __name__ == '__main__':
     conf = argparse.ArgumentParser(description='lfw test protocal.')
     conf.add_argument("--test_set", type = str, 
@@ -50,6 +60,10 @@ if __name__ == '__main__':
     conf.add_argument('--batch_size', type = int, default = 1024)
     conf.add_argument('--model_path', type = str, default = 'mv_epoch_8.pt', 
                       help = 'The path of model or the directory which some models in.')
+    conf.add_argument('--pre_model_path', type = str, default = 'mv_epoch_8.pt', 
+                      help = 'The path of model or the directory which some models in.')
+    conf.add_argument('--adapt_path', type = str, default = 'mv_epoch_8.pt', 
+                      help = 'The path of adapt layer or the directory which some models in.')
     conf.add_argument('--embedding_size', type = int, default = 512, 
                       help='embedding size of backbones.')
     conf.add_argument("--device", type = str, default='cuda:0',
@@ -61,14 +75,18 @@ if __name__ == '__main__':
         pairs_file_path = data_conf['pairs_file_path']
         cropped_face_folder = data_conf['cropped_face_folder']
         image_list_file_path = data_conf['image_list_file_path']
+
+    clip_model, preprocess = clip.load("RN50x16", device=torch.device(args.device))
+    clip_model.eval()
+
     # define pairs_parser_factory
     pairs_parser_factory = PairsParserFactory(pairs_file_path, args.test_set)
     # define dataloader
-    data_loader = DataLoader(CommonTestDataset(cropped_face_folder, image_list_file_path, False), 
+    data_loader = DataLoader(CommonTestDataset(cropped_face_folder, image_list_file_path, False, preprocess), 
                              batch_size=args.batch_size, num_workers=4, shuffle=False)
     #model def
     backbone_factory = BackboneFactory(args.backbone_type, args.backbone_conf_file)
-    model_loader = iresnet100(num_features=args.embedding_size)# ModelLoader(backbone_factory)
+    model_loader = ModelLoader(backbone_factory)
     feature_extractor = CommonExtractor(args.device)
     lfw_evaluator = LFWEvaluator(data_loader, pairs_parser_factory, feature_extractor)
     if os.path.isdir(args.model_path):
@@ -83,10 +101,13 @@ if __name__ == '__main__':
                 accu_list.append((os.path.basename(model_path), mean, std))
         accu_list.sort(key = accu_key, reverse=True)
     else:
-        model_loader.load_state_dict(torch.load(args.model_path,map_location='cpu')['state_dict'])
-        model = model_loader.cuda(args.device)
-        model = FaceModel(model)
-        mean, std = lfw_evaluator.test(model)
+        # pre_model_loader.load_state_dict(torch.load(args.pre_model_path,map_location='cpu'))
+        # pre_model_loader=pre_model_loader.load_model(args.pre_model_path)
+        # pre_model = pre_model_loader.cuda(args.device)
+        model = model_loader.load_model(args.model_path)
+        model = model.cuda(args.device)
+        test_model = FaceModel(model)
+        mean, std = lfw_evaluator.test(test_model)
         accu_list = [(os.path.basename(args.model_path), mean, std)]
     pretty_tabel = PrettyTable(["model_name", "mean accuracy", "standard error"])
     for accu_item in accu_list:

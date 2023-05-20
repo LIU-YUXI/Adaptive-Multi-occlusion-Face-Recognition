@@ -75,11 +75,13 @@ class Adapt_Layer(torch.nn.Module):
         feature_list=[]
         for m in self.linears:
             feature_list.append(m(feature).unsqueeze(-1))
+            print('type',list(feature_list[-1].squeeze(-1)))
         #for i in range(self.category_num):F.normalize()
         #    feature_list[i]=self.leakyrelus[i](feature_list[i])
         feature_list=torch.cat(feature_list,-1)
         # print(feature_list.shape)
         pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
+        print('pred',list(pred))
         # return pred + feature
         # return self.fc(pred) + feature
         pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
@@ -105,7 +107,10 @@ class FaceModel(torch.nn.Module):
         self.text =text
 
     def forward(self, data, data_clip):
-        pred = F.normalize(self.backbone.forward(data))
+
+        pred=self.backbone.forward(data)
+        print('origin',list(pred))        
+        pred = F.normalize(pred)
         logits_per_image, logits_per_text = clip_model(data_clip, self.text)
         prob = logits_per_image.softmax(dim=-1)
         #max_indices = torch.argmax(prob, dim=1)
@@ -113,6 +118,7 @@ class FaceModel(torch.nn.Module):
         #prob.scatter_(1, max_indices.unsqueeze(1), 1)
         #prob = torch.tensor([[1.0,0]]*data.shape[0], dtype=torch.float32).to(data.device)
         pred = self.adapt.forward(pred,prob)
+        print('final',list(pred))
         return pred
 
 if __name__ == '__main__':
@@ -139,7 +145,7 @@ if __name__ == '__main__':
     # parse config.
     with open(args.data_conf_file) as f:
         data_conf = yaml.load(f, Loader=yaml.FullLoader)[args.test_set]
-        pairs_file_path = data_conf['pairs_file_path']
+        # pairs_file_path = data_conf['pairs_file_path']
         cropped_face_folder = data_conf['cropped_face_folder']
         image_list_file_path = data_conf['image_list_file_path']
 
@@ -150,15 +156,15 @@ if __name__ == '__main__':
     print("mask category num:",args.category_mum)
 
     # define pairs_parser_factory
-    pairs_parser_factory = PairsParserFactory(pairs_file_path, args.test_set)
+    # pairs_parser_factory = PairsParserFactory(pairs_file_path, args.test_set)
     # define dataloader
     data_loader = DataLoader(CommonTestDataset(cropped_face_folder, image_list_file_path, False, preprocess), 
                              batch_size=args.batch_size, num_workers=4, shuffle=False)
     #model def
     backbone_factory = BackboneFactory(args.backbone_type, args.backbone_conf_file)
     model_loader = iresnet100(num_features=args.embedding_size)# ModelLoader(backbone_factory)
-    feature_extractor = CommonExtractor(args.device)
-    lfw_evaluator = LFWEvaluator(data_loader, pairs_parser_factory, feature_extractor)
+    # feature_extractor = CommonExtractor(args.device)
+    # lfw_evaluator = LFWEvaluator(data_loader, pairs_parser_factory, feature_extractor)
 
     adapt_model = Adapt_Layer(args.embedding_size,args.category_mum)
     if os.path.isdir(args.model_path):
@@ -178,9 +184,14 @@ if __name__ == '__main__':
         adapt_model.load_state_dict(torch.load(args.adapt_path,map_location='cpu')['state_dict'])
         adapt_model = adapt_model.cuda(args.device)
         test_model = FaceModel(model,adapt_model,clip_model,text)
-        mean, std = lfw_evaluator.test(test_model)
-        accu_list = [(os.path.basename(args.model_path), mean, std)]
-    pretty_tabel = PrettyTable(["model_name", "mean accuracy", "standard error"])
-    for accu_item in accu_list:
-        pretty_tabel.add_row(accu_item)
-    print(pretty_tabel)
+        for batch_idx, (image, image_clip, short_image_path) in enumerate(data_loader):
+            image = image.to(args.device)
+            image_clip = image_clip.to(args.device)
+            print(short_image_path)
+            test_model(image,image_clip)
+        # mean, std = lfw_evaluator.test(test_model)
+        # accu_list = [(os.path.basename(args.model_path), mean, std)]
+    # pretty_tabel = PrettyTable(["model_name", "mean accuracy", "standard error"])
+    # for accu_item in accu_list:
+    #    pretty_tabel.add_row(accu_item)
+    # print(pretty_tabel)

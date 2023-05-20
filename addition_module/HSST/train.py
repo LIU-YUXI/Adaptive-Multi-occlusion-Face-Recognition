@@ -13,14 +13,13 @@ import torch
 from torch import optim
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
-
+from HSST_Prototype import HSST_Prototype
 sys.path.append('../../')
 from utils.AverageMeter import AverageMeter
 from data_processor.train_dataset import ImageDataset_HSST
 from backbone.backbone_def import BackboneFactory
 from head.head_def import HeadFactory
 from test_protocol.utils.online_val import Evaluator
-
 logger.basicConfig(level=logger.INFO, 
                    format='%(levelname)s %(asctime)s %(filename)s: %(lineno)d] %(message)s',
                    datefmt='%Y-%m-%d %H:%M:%S')
@@ -43,12 +42,12 @@ def train_BN(m):
     if classname.find('BatchNorm') != -1:
         m.train()
         
-def shuffle_BN(batch_size):
+def shuffle_BN(batch_size,conf):
     """ShuffleBN for batch, the same as MoCo https://arxiv.org/abs/1911.05722 #######
     """
-    shuffle_ids = torch.randperm(batch_size).long().cuda()
-    reshuffle_ids = torch.zeros(batch_size).long().cuda()
-    reshuffle_ids.index_copy_(0, shuffle_ids, torch.arange(batch_size).long().cuda())
+    shuffle_ids = torch.randperm(batch_size).long().cuda(conf.device)
+    reshuffle_ids = torch.zeros(batch_size).long().cuda(conf.device)
+    reshuffle_ids.index_copy_(0, shuffle_ids, torch.arange(batch_size).long().cuda(conf.device))
     return shuffle_ids, reshuffle_ids
     
 def train_one_epoch(data_loader, probe_net, gallery_net, prototype, optimizer, 
@@ -58,16 +57,16 @@ def train_one_epoch(data_loader, probe_net, gallery_net, prototype, optimizer,
     for batch_idx, (nir_img, vis_img, id_indexes) in enumerate(data_loader):
         batch_size = nir_img.size(0)
         global_batch_idx = cur_epoch * len(data_loader) + batch_idx
-        nir_img = nir_img.cuda()
-        vis_img = vis_img.cuda()
+        nir_img = nir_img.cuda(conf.device)
+        vis_img = vis_img.cuda(conf.device)
         # set inputs as probe or gallery 
-        shuffle_ids, reshuffle_ids = shuffle_BN(batch_size)
+        shuffle_ids, reshuffle_ids = shuffle_BN(batch_size,conf)
         nir_img_probe = probe_net(nir_img)
         with torch.no_grad():
             vis_img = vis_img[shuffle_ids]
             vis_img_gallery = gallery_net(vis_img)[reshuffle_ids]
             vis_img = vis_img[reshuffle_ids]
-        shuffle_ids, reshuffle_ids = shuffle_BN(batch_size)
+        shuffle_ids, reshuffle_ids = shuffle_BN(batch_size,conf)
         vis_img_probe = probe_net(vis_img)
         with torch.no_grad():
             nir_img = nir_img[shuffle_ids]
@@ -98,15 +97,15 @@ def train_one_epoch(data_loader, probe_net, gallery_net, prototype, optimizer,
 def train(conf):
     """Total training procedure. 
     """ 
-    conf.device = torch.device('cuda:0')
+    conf.device = torch.device(conf.device)
     criterion = torch.nn.CrossEntropyLoss().cuda(conf.device)
     backbone_factory = BackboneFactory(conf.backbone_type, conf.backbone_conf_file)
     probe_net = backbone_factory.get_backbone()
     gallery_net = backbone_factory.get_backbone()        
     head_factory = HeadFactory(conf.head_type, conf.head_conf_file)
-    prototype = head_factory.get_head().cuda(conf.device)
-    probe_net = torch.nn.DataParallel(probe_net).cuda()
-    gallery_net = torch.nn.DataParallel(gallery_net).cuda()
+    prototype = HSST_Prototype(conf).cuda(conf.device)#head_factory.get_head().cuda(conf.device)
+    probe_net = probe_net.cuda(conf.device)# torch.nn.DataParallel(probe_net).cuda()
+    gallery_net = gallery_net.cuda(conf.device)# torch.nn.DataParallel(gallery_net).cuda()
     optimizer = optim.SGD(probe_net.parameters(), lr=conf.lr, momentum=conf.momentum, weight_decay=5e-4)
     lr_schedule = optim.lr_scheduler.MultiStepLR(optimizer, milestones=conf.milestones, gamma=0.1)
     if conf.resume:
@@ -117,9 +116,11 @@ def train(conf):
 
     exclude_id_set = set()
     loss_meter = AverageMeter()
+    # ID=ImageDataset_HSST(conf.data_root,conf.data_mask_root,conf.train_file, exclude_id_set)
+    # ID.__getitem__(10)
     for epoch in range(conf.epoches):
         data_loader = DataLoader(
-            ImageDataset_HSST(conf.data_root, conf.train_file, exclude_id_set), 
+            ImageDataset_HSST(conf.data_root,conf.data_mask_root,conf.train_file, exclude_id_set), 
             conf.batch_size, True, num_workers = 4, drop_last = True)
         exclude_id_set = train_one_epoch(data_loader, probe_net, gallery_net, 
             prototype, optimizer, criterion, epoch, conf, loss_meter)
@@ -131,6 +132,8 @@ if __name__ == '__main__':
     conf = argparse.ArgumentParser(description='semi-siamese_training for face recognition.')
     conf.add_argument("--data_root", type = str, 
                       help = "The root folder of training set.")
+    conf.add_argument("--data_mask_root", type = str, 
+                      help = "The root folder of mask training set.")
     conf.add_argument("--train_file", type = str,  
                       help = "The train file path.")
     conf.add_argument('--backbone_type', type=str, default='Mobilefacenets', 
@@ -173,6 +176,8 @@ if __name__ == '__main__':
                       help = 'Test set to evaluate the model.')  
     conf.add_argument('--test_data_conf_file', type = str, 
                       help = 'The path of test data conf file.')    
+    conf.add_argument("--device", type = str, default='cuda:0',
+                      help = "dviece.")  
     args = conf.parse_args()
     args.milestones = [int(num) for num in args.step.split(',')]
     if not os.path.exists(args.out_dir):

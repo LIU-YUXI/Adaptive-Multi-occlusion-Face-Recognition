@@ -20,7 +20,7 @@ import torchvision.datasets as dsets
 import os.path as osp
 sys.path.append('../../')
 from utils.AverageMeter import AverageMeter
-from data_processor.train_dataset import ImageDataset,ImageDataset_KD
+from data_processor.train_dataset import ImageDataset,ImageDataset_KD, ImageDataset_KD_glasses, ImageDataset_KD_glasses_sunglasses, ImageDataset_KD_glasses_sunglasses_save
 from backbone.backbone_def import BackboneFactory
 from head.head_def import HeadFactory
 from backbone.iresnet import iresnet100
@@ -28,6 +28,7 @@ import clip
 import random
 import numpy as np
 import torch.nn as nn
+# os.environ["CUDA_VISIBLE_DEVICES"] = '1'
 
 logger.basicConfig(level=logger.INFO, 
                    format='%(levelname)s %(asctime)s %(filename)s: %(lineno)d] %(message)s',
@@ -42,22 +43,98 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True 
     torch.backends.cudnn.benchmark = False
 
+class Adapter(nn.Module):
+    def __init__(self, c_in, reduction=1):
+        super(Adapter, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(c_in, c_in // reduction, bias=False),
+            # nn.ReLU(inplace=True),
+            nn.Linear(c_in // reduction, c_in, bias=False),
+            # nn.ReLU(inplace=True)
+        )
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+'''
 class Adapt_Layer(torch.nn.Module):
     def __init__(self, embedding_dim, category_num):
         super(Adapt_Layer, self).__init__()
         self.embedding_dim=embedding_dim
         self.category_num=category_num
         self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
-
+        self.pred_weight_fc = nn.Linear(embedding_dim,1)
+        self.feature_weight_fc = nn.Linear(embedding_dim,1)
+        # self.relus = nn.ModuleList([nn.ReLU(inplace=True) for i in range(category_num)])
+        # self.relu=nn.ReLU(inplace=True)
+        # self.leakyrelus = nn.ModuleList([nn.LeakyReLU(negative_slope=0.5, inplace=False) for i in range(category_num)])
     def forward(self, feature, prob):
         feature_list=[]
         for m in self.linears:
             feature_list.append(m(feature).unsqueeze(-1))
+        #for i in range(self.category_num):F.normalize()
+        #    feature_list[i]=self.leakyrelus[i](feature_list[i])
         feature_list=torch.cat(feature_list,-1)
         # print(feature_list.shape)
         pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        return pred
+        pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
+        feature_weight=torch.sigmoid(self.feature_weight_fc(feature))
+        # ratio = 0.2
+        # ratio=pred_weight/(pred_weight+feature_weight+1e-8)
+        # return ratio*(pred) + (1-ratio)*feature# self.relu(pred) + feature
+        return pred_weight*pred + feature_weight*feature
+'''
+class Adapt_Layer(torch.nn.Module):
+    def __init__(self, embedding_dim, category_num):
+        super(Adapt_Layer, self).__init__()
+        self.embedding_dim=embedding_dim
+        self.category_num=category_num
+        # self.linears = nn.ModuleList([Adapter(embedding_dim) for i in range(category_num)])
+        self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
+        self.pred_weight_fc = nn.Linear(embedding_dim,1)
+        self.feature_weight_fc = nn.Linear(embedding_dim,1)
+        # self.relus = nn.ModuleList([nn.ReLU(inplace=True) for i in range(category_num)])
+        # self.relu=nn.ReLU(inplace=True)
+        # self.leakyrelus = nn.ModuleList([nn.LeakyReLU(negative_slope=0.5, inplace=False) for i in range(category_num)])
+        # self.fc = nn.Linear(embedding_dim,embedding_dim)
+    def forward(self, feature, prob):
+        # print('origin',list(feature))
+        feature_list=[]
+        for m in self.linears:
+            feature_list.append(m(feature).unsqueeze(-1))
+            # print('type',feature_list[-1])
+        #for i in range(self.category_num):F.normalize()
+        #    feature_list[i]=self.leakyrelus[i](feature_list[i])
+        feature_list=torch.cat(feature_list,-1)
+        # print(feature_list.shape)
+        pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
+        # print('pred',list(pred))
+        # return pred + feature
+        # return self.fc(pred) + feature
+        pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
+        feature_weight=torch.sigmoid(self.feature_weight_fc(feature))
+        # ratio = 0.2
+        # ratio=pred_weight/(pred_weight+feature_weight+1e-8)
+        # return ratio*(pred) + (1-ratio)*feature# self.relu(pred) + feature
+        return (pred_weight)*pred + (feature_weight)*feature
 
+'''
+class Adapt_Layer(torch.nn.Module):
+    def __init__(self, embedding_dim, category_num):
+        super(Adapt_Layer, self).__init__()
+        self.embedding_dim=embedding_dim
+        self.category_num=category_num
+        self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
+    def forward(self, feature, prob):
+        feature_list=[]
+        for m in self.linears:
+            feature_list.append(m(feature).unsqueeze(-1))
+        #for i in range(self.category_num):F.normalize()
+        #    feature_list[i]=self.leakyrelus[i](feature_list[i])
+        feature_list=torch.cat(feature_list,-1)
+        # print(feature_list.shape)
+        pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
+        return pred+feature
+'''
 def get_lr(optimizer):
     """Get the current learning rate from optimizer. 
     """
@@ -66,7 +143,7 @@ def get_lr(optimizer):
 
 def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, clip_model,text, adapt_model, 
                         model_optimizer, header_optimizer, adapt_optimizer,
-                        criterion,criterion2, cur_epoch, loss,loss1,loss2, conf):
+                        criterion,criterion2,criterion3, cur_epoch, loss,loss1,loss2, conf):
     """Tain one epoch by traditional training.
     """
     for batch_idx, (mask_images, images_clip, images, labels, cgs) in enumerate(data_loader):
@@ -82,18 +159,22 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
         with torch.no_grad():
             logits_per_image, logits_per_text = clip_model(images_clip, text)
             prob = logits_per_image.softmax(dim=-1)
+            #max_indices = torch.argmax(prob, dim=1)
+            #prob = torch.zeros_like(prob)
+            #prob.scatter_(1, max_indices.unsqueeze(1), 1)
             # print(cgs[:10],prob[:10])
         # prob = torch.tensor([[1.0,0]]*images.shape[0], dtype=torch.float32).to(conf.device)
         # print(prob.shape)
         features_adapt = adapt_model(features_student, prob)# F.normalize( )
         thetas = header(features_adapt, labels)
+        # print(gloss.shape), gloss+gloss.sum()
         loss_v1 = criterion(thetas, labels)
-        loss_v2 = conf.w*criterion2(features_adapt, features_teacher)
+        loss_v2 = 10*conf.w*(criterion2(features_student, features_teacher))# +10*conf.w*(criterion3(pred, features_teacher))
         loss_v = loss_v1 + loss_v2
         loss_v.backward()#compute
 
         clip_grad_norm_(backbone_student.parameters(), max_norm=5, norm_type=2)
-
+        # clip_grad_norm_(adapt_model.parameters(), max_norm=5, norm_type=2)
         model_optimizer.step()
         header_optimizer.step()#update
         adapt_optimizer.step()
@@ -103,7 +184,7 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
         loss.update(loss_v.item(), 1)
         loss1.update(loss_v1.item(), 1)
         loss2.update(loss_v2.item(), 1)        
-
+        return   
         if batch_idx % conf.print_freq == 0:
             loss_avg = loss.avg
             lr = get_lr(model_optimizer)
@@ -162,7 +243,7 @@ def train(conf):
              ])
     clip_model, preprocess = clip.load("RN50x16", device=torch.device(conf.device))
     clip_model.eval()
-    text = clip.tokenize(["A human face","A human face in a mask","A human face with glasses"]).to(conf.device) # without a mask
+    text = clip.tokenize(["A human face","A human face in a mask","A human face with glasses" , "A human face with sunglasses"]).to(conf.device) # without a mask
     conf.category_mum = text.shape[0]
     print("mask category num:",conf.category_mum)
     '''
@@ -180,7 +261,7 @@ def train(conf):
     '''
     data
     '''
-    data_loader = DataLoader(ImageDataset_KD(conf.data_root, conf.train_file,transform=transform,preprocess=preprocess), 
+    data_loader = DataLoader(ImageDataset_KD_glasses_sunglasses_save(conf.data_root, conf.train_file,transform=transform,preprocess=preprocess), 
                                conf.batch_size, True, num_workers = 4)
     '''
     teacher
@@ -252,13 +333,13 @@ def train(conf):
         header_optimizer, milestones = conf.milestones, gamma = 0.1)
     header.train()
 
-
     criterion = torch.nn.CrossEntropyLoss().cuda(conf.device)
     criterion2 = torch.nn.MSELoss().cuda(conf.device)
+    criterion3 = torch.nn.MSELoss().cuda(conf.device)
     for epoch in range(ori_epoch, conf.epoches):
         train_one_epoch(data_loader, backbone_teacher, model,header,clip_model,text, adapt_model,
                         model_optimizer, header_optimizer, adapt_optimizer,
-                        criterion,criterion2, epoch, loss,loss1,loss2, conf)
+                        criterion,criterion2,criterion3, epoch, loss,loss1,loss2, conf)
         lr_schedule_header.step()  
         lr_schedule_model.step()    
         lr_schedule_adapt.step()            
@@ -337,7 +418,7 @@ if __name__ == '__main__':
         shutil.rmtree(tensorboardx_logdir)
     writer = SummaryWriter(log_dir=tensorboardx_logdir)
     args.writer = writer
-    
+    print(os.environ)
     logger.info('Start optimization.')
     logger.info(args)
     train(args)

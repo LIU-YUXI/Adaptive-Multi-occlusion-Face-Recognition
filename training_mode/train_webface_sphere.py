@@ -20,7 +20,7 @@ import torchvision.datasets as dsets
 import os.path as osp
 sys.path.append('../../')
 from utils.AverageMeter import AverageMeter
-from data_processor.train_dataset import ImageDataset,ImageDataset_KD, ImageDataset_KD_glasses, ImageDataset_KD_glasses_sunglasses
+from data_processor.train_dataset import ImageDataset,ImageDataset_KD, ImageDataset_KD_glasses_sunglasses
 from backbone.backbone_def import BackboneFactory
 from head.head_def import HeadFactory
 from backbone.iresnet import iresnet100
@@ -28,8 +28,7 @@ import clip
 import random
 import numpy as np
 import torch.nn as nn
-# os.environ["CUDA_VISIBLE_DEVICES"] = '1'
-
+from backbone.net_sphere import sphere20a,AngleLoss
 logger.basicConfig(level=logger.INFO, 
                    format='%(levelname)s %(asctime)s %(filename)s: %(lineno)d] %(message)s',
                    datefmt='%Y-%m-%d %H:%M:%S')
@@ -43,147 +42,47 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True 
     torch.backends.cudnn.benchmark = False
 
-class Adapter(nn.Module):
-    def __init__(self, c_in, reduction=1):
-        super(Adapter, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(c_in, c_in // reduction, bias=False),
-            # nn.ReLU(inplace=True),
-            nn.Linear(c_in // reduction, c_in, bias=False),
-            # nn.ReLU(inplace=True)
-        )
-    def forward(self, x):
-        x = self.fc(x)
-        return x
-'''
-class Adapt_Layer(torch.nn.Module):
-    def __init__(self, embedding_dim, category_num):
-        super(Adapt_Layer, self).__init__()
-        self.embedding_dim=embedding_dim
-        self.category_num=category_num
-        self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
-        self.pred_weight_fc = nn.Linear(embedding_dim,1)
-        self.feature_weight_fc = nn.Linear(embedding_dim,1)
-        # self.relus = nn.ModuleList([nn.ReLU(inplace=True) for i in range(category_num)])
-        # self.relu=nn.ReLU(inplace=True)
-        # self.leakyrelus = nn.ModuleList([nn.LeakyReLU(negative_slope=0.5, inplace=False) for i in range(category_num)])
-    def forward(self, feature, prob):
-        feature_list=[]
-        for m in self.linears:
-            feature_list.append(m(feature).unsqueeze(-1))
-        #for i in range(self.category_num):F.normalize()
-        #    feature_list[i]=self.leakyrelus[i](feature_list[i])
-        feature_list=torch.cat(feature_list,-1)
-        # print(feature_list.shape)
-        pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
-        feature_weight=torch.sigmoid(self.feature_weight_fc(feature))
-        # ratio = 0.2
-        # ratio=pred_weight/(pred_weight+feature_weight+1e-8)
-        # return ratio*(pred) + (1-ratio)*feature# self.relu(pred) + feature
-        return pred_weight*pred + feature_weight*feature
-'''
-class Adapt_Layer(torch.nn.Module):
-    def __init__(self, embedding_dim, category_num):
-        super(Adapt_Layer, self).__init__()
-        self.embedding_dim=embedding_dim
-        self.category_num=category_num
-        # self.linears = nn.ModuleList([Adapter(embedding_dim) for i in range(category_num)])
-        self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
-        # self.pred_weight_fc = nn.Linear(embedding_dim,1)
-        # self.feature_weight_fc = nn.Linear(embedding_dim,1)
-        # self.relus = nn.ModuleList([nn.ReLU(inplace=True) for i in range(category_num)])
-        # self.relu=nn.ReLU(inplace=True)
-        # self.leakyrelus = nn.ModuleList([nn.LeakyReLU(negative_slope=0.5, inplace=False) for i in range(category_num)])
-    def forward(self, feature, prob):
-        feature_list=[]
-        for m in self.linears:
-            feature_list.append(m(feature).unsqueeze(-1))
-        #for i in range(self.category_num):F.normalize()
-        #    feature_list[i]=self.leakyrelus[i](feature_list[i])
-        feature_list=torch.cat(feature_list,-1)
-        # print(feature_list.shape)
-        pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        return pred + feature
-        # pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
-        # feature_weight=torch.sigmoid(self.feature_weight_fc(feature))
-        # ratio = 0.2
-        # ratio=pred_weight/(pred_weight+feature_weight+1e-8)
-        # return ratio*(pred) + (1-ratio)*feature# self.relu(pred) + feature
-        # return pred_weight*pred + feature_weight*feature
-'''
-class Adapt_Layer(torch.nn.Module):
-    def __init__(self, embedding_dim, category_num):
-        super(Adapt_Layer, self).__init__()
-        self.embedding_dim=embedding_dim
-        self.category_num=category_num
-        self.linears = nn.ModuleList([nn.Linear(embedding_dim,embedding_dim) for i in range(category_num)])
-    def forward(self, feature, prob):
-        feature_list=[]
-        for m in self.linears:
-            feature_list.append(m(feature).unsqueeze(-1))
-        #for i in range(self.category_num):F.normalize()
-        #    feature_list[i]=self.leakyrelus[i](feature_list[i])
-        feature_list=torch.cat(feature_list,-1)
-        # print(feature_list.shape)
-        pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        return pred+feature
-'''
 def get_lr(optimizer):
     """Get the current learning rate from optimizer. 
     """
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, clip_model,text, adapt_model, 
-                        model_optimizer, header_optimizer, adapt_optimizer,
-                        criterion,criterion2,criterion3, cur_epoch, loss,loss1,loss2, conf):
+def train_one_epoch(data_loader,  backbone_student, 
+                        model_optimizer,
+                        criterion,criterion2, cur_epoch, loss,loss1,loss2, conf):
     """Tain one epoch by traditional training.
     """
     for batch_idx, (mask_images, images_clip, images, labels, cgs) in enumerate(data_loader):
         images = images.to(conf.device)
-        images_clip = images_clip.to(conf.device)
         mask_images = mask_images.to(conf.device)
         # print(images.shape)
         labels = labels.to(conf.device)
         labels = labels.squeeze()
-        with torch.no_grad():
-            features_teacher = F.normalize(backbone_teacher(images))
-        features_student = F.normalize(backbone_student(mask_images))
-        with torch.no_grad():
-            logits_per_image, logits_per_text = clip_model(images_clip, text)
-            prob = logits_per_image.softmax(dim=-1)
-            #max_indices = torch.argmax(prob, dim=1)
-            #prob = torch.zeros_like(prob)
-            #prob.scatter_(1, max_indices.unsqueeze(1), 1)
-            # print(cgs[:10],prob[:10])
-        # prob = torch.tensor([[1.0,0]]*images.shape[0], dtype=torch.float32).to(conf.device)
-        # print(prob.shape)
-        features_adapt = adapt_model(features_student, prob)# F.normalize( )
-        thetas = header(features_adapt, labels)
-        # print(gloss.shape), gloss+gloss.sum()
-        loss_v1 = criterion(thetas, labels)
-        loss_v2 = 10*conf.w*(criterion2(features_student, features_teacher))+conf.w*(criterion3(features_adapt, features_teacher))
-        loss_v = loss_v1 + loss_v2
+        #with torch.no_grad():
+        #    features_teacher = F.normalize(backbone_teacher(images))
+        features_student = backbone_student(mask_images[:,:,8:104])
+        # thetas = header(features_student, labels)
+        loss_v1 = criterion(features_student, labels)
+        loss_v2 = 0 #conf.w*criterion2(features_student, features_teacher)
+        loss_v = loss_v1 # + loss_v2
         loss_v.backward()#compute
 
         clip_grad_norm_(backbone_student.parameters(), max_norm=5, norm_type=2)
-        # clip_grad_norm_(adapt_model.parameters(), max_norm=5, norm_type=2)
+
         model_optimizer.step()
-        header_optimizer.step()#update
-        adapt_optimizer.step()
+        # header_optimizer.step()#update
         model_optimizer.zero_grad()
-        header_optimizer.zero_grad()
-        adapt_optimizer.zero_grad()
+        # header_optimizer.zero_grad()
         loss.update(loss_v.item(), 1)
         loss1.update(loss_v1.item(), 1)
-        loss2.update(loss_v2.item(), 1)        
+        # loss2.update(loss_v2.item(), 1)        
 
         if batch_idx % conf.print_freq == 0:
             loss_avg = loss.avg
             lr = get_lr(model_optimizer)
             logger.info('Epoch %d, iter %d/%d, lr %f, loss %f, cross entropy loss %f, KD loss %f' % 
-                        (cur_epoch, batch_idx, len(data_loader), lr, loss_avg,loss1.avg,loss2.avg))
+                        (cur_epoch, batch_idx, len(data_loader), lr, loss_avg,loss1.avg,0))
             global_batch_idx = cur_epoch * len(data_loader) + batch_idx
             conf.writer.add_scalar('Train_loss', loss_avg, global_batch_idx)
             conf.writer.add_scalar('Train_lr', lr, global_batch_idx)
@@ -196,6 +95,7 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
                 'batch_id': batch_idx
             }
             torch.save(state, os.path.join(conf.out_dir, saved_name))
+            '''
             saved_name_header = 'Epoch_%d_batch_%d_header.pt' % (cur_epoch, batch_idx)
             state_header = {
                 'state_dict': header.state_dict(),
@@ -203,26 +103,18 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
                 'batch_id': batch_idx
             }
             torch.save(state_header, os.path.join(conf.out_dir, saved_name_header))
-            saved_name_adapt = 'Epoch_%d_batch_%d_adapt.pt' % (cur_epoch, batch_idx)
-            state_adapt = {
-                'state_dict': adapt_model.state_dict(),
-                'epoch': cur_epoch,
-                'batch_id': batch_idx
-            }
-            torch.save(state_adapt, os.path.join(conf.out_dir, saved_name_adapt))
+            '''
             logger.info('Save checkpoint %s to disk.' % saved_name)
     saved_name = 'Epoch_%d.pt' % cur_epoch
     state = {'state_dict': backbone_student.state_dict(), 
              'epoch': cur_epoch, 'batch_id': batch_idx}
     torch.save(state, os.path.join(conf.out_dir, saved_name))
+    '''
     saved_name = 'Epoch_%d_header.pt' % cur_epoch
     state = {'state_dict':header.state_dict(), 
              'epoch': cur_epoch, 'batch_id': batch_idx}
     torch.save(state, os.path.join(conf.out_dir, saved_name))
-    saved_name = 'Epoch_%d_adapt.pt' % cur_epoch
-    state = {'state_dict':adapt_model.state_dict(), 
-             'epoch': cur_epoch, 'batch_id': batch_idx}
-    torch.save(state, os.path.join(conf.out_dir, saved_name))
+    '''
     logger.info('Save checkpoint %s to disk...' % saved_name)
 
 def train(conf):
@@ -235,31 +127,14 @@ def train(conf):
              transforms.ToTensor(),
              transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
              ])
-    clip_model, preprocess = clip.load("RN50x16", device=torch.device(conf.device))
-    clip_model.eval()
-    text = clip.tokenize(["A human face","A human face in a mask","A human face with glasses" , "A human face with sunglasses"]).to(conf.device) # without a mask
-    conf.category_mum = text.shape[0]
-    print("mask category num:",conf.category_mum)
-    '''
-    Adapt Layer
-    '''
-    adapt_model =  Adapt_Layer(conf.embedding_size,conf.category_mum)
-    if conf.resume:
-        try:
-            adapt_model_pth = os.path.join(conf.out_dir,conf.pretrain_adapt )
-            adapt_model.load_state_dict(torch.load(adapt_model_pth,map_location='cpu')['state_dict'])
-        except (FileNotFoundError, KeyError, IndexError, RuntimeError):
-            logger.info("load adapt layer resume init, failed!")
-    adapt_model.train()
-    adapt_model = adapt_model.cuda(conf.device)
+
     '''
     data
     '''
-    data_loader = DataLoader(ImageDataset_KD_glasses_sunglasses(conf.data_root, conf.train_file,transform=transform,preprocess=preprocess), 
+    data_loader = DataLoader(ImageDataset_KD_glasses_sunglasses(conf.data_root, conf.train_file,transform=transform), 
                                conf.batch_size, True, num_workers = 4)
     '''
     teacher
-    '''
     backbone_teacher = iresnet100(num_features=conf.embedding_size)
     #try:
     backbone_teacher_pth = os.path.join(conf.teacher_pth, str(conf.teacher_global_step) + "backbone.pth")
@@ -267,18 +142,21 @@ def train(conf):
     print(backbone_teacher_pth)
     #except (FileNotFoundError, KeyError, IndexError, RuntimeError):
     #    logger.info("load teacher backbone init, failed!")
+    '''
     # load student model
-    backbone_student = iresnet100(num_features=conf.embedding_size)
+    backbone_student = sphere20a(classnum=68000, feature=False)# BackboneFactory(conf.backbone_type, conf.backbone_conf_file)# iresnet100(num_features=conf.embedding_size)
+    # backbone_student = backbone_student.get_backbone()
     if conf.resume:
         try:
             backbone_student_pth = os.path.join(conf.out_dir,conf.pretrain_model )
             backbone_student.load_state_dict(torch.load(backbone_student_pth,map_location='cpu')['state_dict'])
         except (FileNotFoundError, KeyError, IndexError, RuntimeError):
             logger.info("load student backbone resume init, failed!")
-    backbone_teacher.eval()
-    backbone_teacher = backbone_teacher.cuda(conf.device)# torch.nn.DataParallel(backbone_teacher).cuda(conf.device)
+    # backbone_teacher.eval()
+    # backbone_teacher = backbone_teacher.cuda(conf.device)# torch.nn.DataParallel(backbone_teacher).cuda(conf.device)
     # backbone_student.train()
     # backbone_factory = BackboneFactory(conf.backbone_type, conf.backbone_conf_file)    
+    '''
     header = HeadFactory(conf.head_type, conf.head_conf_file).get_head()
     if conf.resume:
         try:
@@ -286,6 +164,7 @@ def train(conf):
             header.load_state_dict(torch.load(backbone_header_pth,map_location='cpu')['state_dict'])
         except (FileNotFoundError, KeyError, IndexError, RuntimeError):
             logger.info("load header backbone resume init, failed!")
+    '''
     # model = FaceModel(backbone_factory, head_factory)
     ori_epoch = 0
     if conf.resume:
@@ -300,11 +179,7 @@ def train(conf):
     print(conf.milestones)
     if(len(conf.milestones)==0):
         conf.milestones=[100]
-    parameters = [p for p in adapt_model.parameters() if p.requires_grad]
-    adapt_optimizer = optim.SGD(parameters, lr = conf.lr, 
-                          momentum = conf.momentum, weight_decay = 1e-4)
-    lr_schedule_adapt = optim.lr_scheduler.MultiStepLR(
-        adapt_optimizer, milestones = conf.milestones, gamma = 0.1)
+
 
     model = backbone_student.cuda(conf.device)# torch.nn.DataParallel(backbone_student).cuda(conf.device)
     parameters = [p for p in backbone_student.parameters() if p.requires_grad]
@@ -318,7 +193,7 @@ def train(conf):
     loss2 = AverageMeter()
     # This function computes the average loss over an epoch, that is, the average of the loss over each sample.
     model.train()
-
+    '''
     header=header.cuda(conf.device)# torch.nn.DataParallel(header).cuda(conf.device)
     parameters = [p for p in header.parameters() if p.requires_grad]
     header_optimizer = optim.SGD(parameters, lr = conf.lr, 
@@ -326,17 +201,17 @@ def train(conf):
     lr_schedule_header = optim.lr_scheduler.MultiStepLR(
         header_optimizer, milestones = conf.milestones, gamma = 0.1)
     header.train()
+    '''
 
-    criterion = torch.nn.CrossEntropyLoss().cuda(conf.device)
+
+    criterion = AngleLoss().cuda(conf.device)# torch.nn.CrossEntropyLoss().cuda(conf.device)
     criterion2 = torch.nn.MSELoss().cuda(conf.device)
-    criterion3 = torch.nn.MSELoss().cuda(conf.device)
     for epoch in range(ori_epoch, conf.epoches):
-        train_one_epoch(data_loader, backbone_teacher, model,header,clip_model,text, adapt_model,
-                        model_optimizer, header_optimizer, adapt_optimizer,
-                        criterion,criterion2,criterion3, epoch, loss,loss1,loss2, conf)
-        lr_schedule_header.step()  
-        lr_schedule_model.step()    
-        lr_schedule_adapt.step()            
+        train_one_epoch(data_loader, model,
+                        model_optimizer,
+                        criterion,criterion2, epoch, loss,loss1,loss2, conf)
+        # lr_schedule_header.step()  
+        lr_schedule_model.step()           
 
 if __name__ == '__main__':
     conf = argparse.ArgumentParser(description='traditional_training for face recognition.')

@@ -14,9 +14,11 @@ See the detail requirements in [requirements.txt](./requirements.txt)
 
 ## Model Training
 
-run [./train.sh](./training_mode/conventional_training/train.sh) with the train dataset CASIA-Webface ([baidu Pan Link](https://pan.baidu.com/s/1mSbJ61BWEqPqv6RZkqv7CQ?pwd=877a))
+run [./train.sh](./training_mode/conventional_training/train.sh) with the train dataset CASIA-Webface ([baidu Pan Link](https://pan.baidu.com/s/1mSbJ61BWEqPqv6RZkqv7CQ?pwd=877a)).
+
 Download teacher model (ElasticFace-Arc) from [ElasticFace](https://github.com/fdbtrs/ElasticFace). 
-Download CLIP model (RN50x16) from [CLIP](https://openaipublic.azureedge.net/clip/models/52378b407f34354e150460fe41077663dd5b39c54cd0bfd2b27167a4a06ec9aa/RN50x16.pt)
+
+Download CLIP model (RN50x16) from [CLIP](https://openaipublic.azureedge.net/clip/models/52378b407f34354e150460fe41077663dd5b39c54cd0bfd2b27167a4a06ec9aa/RN50x16.pt).
 
 ## Model Test
 

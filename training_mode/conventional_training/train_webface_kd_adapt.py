@@ -183,8 +183,7 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
         adapt_optimizer.zero_grad()
         loss.update(loss_v.item(), 1)
         loss1.update(loss_v1.item(), 1)
-        loss2.update(loss_v2.item(), 1)        
-        return   
+        loss2.update(loss_v2.item(), 1)          
         if batch_idx % conf.print_freq == 0:
             loss_avg = loss.avg
             lr = get_lr(model_optimizer)
@@ -241,7 +240,7 @@ def train(conf):
              transforms.ToTensor(),
              transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
              ])
-    clip_model, preprocess = clip.load("RN50x16", device=torch.device(conf.device))
+    clip_model, preprocess = clip.load("/mnt/diskB/lyx/clip_model/RN50x16.pt", device=torch.device(conf.device))
     clip_model.eval()
     text = clip.tokenize(["A human face","A human face in a mask","A human face with glasses" , "A human face with sunglasses"]).to(conf.device) # without a mask
     conf.category_mum = text.shape[0]
@@ -392,7 +391,7 @@ if __name__ == '__main__':
                       help = 'The path of pretrained header')
     conf.add_argument('--resume', '-r', action = 'store_true', default = False, 
                       help = 'Whether to resume from a checkpoint.')
-    conf.add_argument("--teacher_pth", type = str, default = '/CIS20/lyx/FaceX-Zoo-main-new/training_mode/conventional_training/teacher_model',
+    conf.add_argument("--teacher_pth", type = str, default = '/mnt/diskB/lyx/AMOFR/training_mode/conventional_training/teacher_model/',
                       help = "the path of teacher backbone.")
     conf.add_argument("--teacher_global_step", type = int , default = 295672,
                       help = "the step of teacher backbone.")       

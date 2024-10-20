@@ -72,15 +72,19 @@ class Adapt_Layer(torch.nn.Module):
         # self.leakyrelus = nn.ModuleList([nn.LeakyReLU(negative_slope=0.5, inplace=False) for i in range(category_num)])
         # self.fc = nn.Linear(embedding_dim,embedding_dim)
     def forward(self, feature, prob):
+        # print('origin',list(feature))
         feature_list=[]
         for m in self.linears:
             feature_list.append(m(feature).unsqueeze(-1))
+            # print('type',feature_list[-1])
         #for i in range(self.category_num):F.normalize()
         #    feature_list[i]=self.leakyrelus[i](feature_list[i])
         feature_list=torch.cat(feature_list,-1)
         # print(feature_list.shape)
         pred = torch.matmul(feature_list,prob.to(dtype=feature.dtype).unsqueeze(-1)).squeeze(-1)
-        # return pred + feature
+        # return pred
+        # print('pred',list(pred))
+        return pred + feature
         # return self.fc(pred) + feature
         pred_weight=torch.sigmoid(self.pred_weight_fc(pred))
         feature_weight=torch.sigmoid(self.feature_weight_fc(feature))
@@ -143,7 +147,7 @@ if __name__ == '__main__':
         cropped_face_folder = data_conf['cropped_face_folder']
         image_list_file_path = data_conf['image_list_file_path']
 
-    clip_model, preprocess = clip.load("RN50x16", device=torch.device(args.device))
+    clip_model, preprocess = clip.load("/mnt/diskB/lyx/clip_model/RN50x16.pt", device=torch.device(args.device))
     clip_model.eval()
     text = clip.tokenize(["A human face","A human face in a mask","A human face with glasses","A human face with sunglasses"]).to(args.device)# 
     args.category_mum = text.shape[0]#
@@ -184,3 +188,6 @@ if __name__ == '__main__':
     for accu_item in accu_list:
         pretty_tabel.add_row(accu_item)
     print(pretty_tabel)
+# 增加新的数据集要在AMOFR/test_protocol/lfw/pairs_parser.py增加新的内容：
+# elif self.test_set == 'CPLFW' or self.test_set == 'CPLFW_CROP':
+# pairs_parser = CPLFW_PairsParser(self.pairs_file)

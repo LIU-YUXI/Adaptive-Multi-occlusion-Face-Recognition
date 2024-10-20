@@ -169,7 +169,7 @@ def train_one_epoch(data_loader, backbone_teacher, backbone_student, header, cli
         thetas = header(features_adapt, labels)
         # print(gloss.shape), gloss+gloss.sum()
         loss_v1 = criterion(thetas, labels)
-        loss_v2 = 10*conf.w*(criterion2(features_student, features_teacher))# +10*conf.w*(criterion3(pred, features_teacher))
+        loss_v2 = conf.w*(criterion2(features_student, features_teacher))# +10*conf.w*(criterion3(pred, features_teacher))
         loss_v = loss_v1 + loss_v2
         loss_v.backward()#compute
 
